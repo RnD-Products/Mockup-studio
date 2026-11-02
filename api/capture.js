@@ -7,7 +7,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { recordPage } from '../lib/record.js';
 
-const LOCAL_MSG = "That address is only reachable from your own computer, so the hosted server can't open it. Use “Record screen” (share the tab), or run the app locally (npm start).";
+const LOCAL_MSG = "That address is only reachable from your own computer, so the live site can't open it directly. Start the local app (run npm start in the mockup-studio folder) and try again: the live site then uses it automatically.";
 const localErr = () => Object.assign(new Error(LOCAL_MSG), { code: 'LOCAL' });
 const LOCAL_OK = process.env.ALLOW_LOCAL === '1';                 // only for testing on this machine
 
@@ -47,7 +47,10 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(400).json({ error: e.code === 'LOCAL' ? e.message : 'Enter a valid public link, e.g. https://example.com' });
   }
-  const vw = Math.min(Math.max(+width || 1440, 320), 1920), vh = Math.min(Math.max(+height || 900, 240), 1200);
+  // the hosted machine is small: record at most 1280 px wide (same aspect), which keeps frames fast and light
+  let vw = Math.min(Math.max(+width || 1440, 320), 1920), vh = Math.min(Math.max(+height || 900, 240), 1200);
+  if (vw > 1280) { vh = Math.round(vh * 1280 / vw); vw = 1280; }
+  const T0 = Date.now(), ts = () => ((Date.now() - T0) / 1000).toFixed(1) + 's';
 
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
@@ -57,6 +60,7 @@ export default async function handler(req, res) {
   let browser;
   try {
     const local = !!process.env.CHROME_PATH;
+    send({ info: 'Starting browser' });
     browser = await puppeteer.launch({
       args: local ? ['--no-sandbox', '--hide-scrollbars'] : await puppeteer.defaultArgs({ args: [...chromium.args, '--hide-scrollbars'], headless: 'shell' }),
       defaultViewport: null,
@@ -65,7 +69,7 @@ export default async function handler(req, res) {
     });
     const out = await recordPage({
       browser, url: target.href, mode, duration, speed, width: vw, height: vh,
-      maxScrollSec: 22, warmupMs: 4000, gotoMs: 15000, quality: 52, minFrameGap: 0.066,   // fits Vercel's 60 s function limit
+      maxScrollSec: 20, warmupMs: 3000, gotoMs: 15000, quality: 45, minFrameGap: 0.066, skipIdle: true,   // fits Vercel's 60 s function limit
       prepare: async (page) => {
         await page.setRequestInterception(true);
         page.on('request', async (r) => {                                  // never let the page reach private networks
@@ -73,10 +77,10 @@ export default async function handler(req, res) {
         });
       },
       onFrame: ({ ts, data }) => send({ t: ts, f: data }),
-      onInfo: (m) => send({ info: m }),
+      onInfo: (m) => send({ info: `${m} · ${ts()}` }),
     });
     if (out.image) send({ image: Buffer.from(out.image).toString('base64') });
-    else send({ done: true, length: out.length, frames: out.frames, pageHeight: out.pageHeight, ended: out.ended });
+    else send({ done: true, length: out.length, frames: out.frames, pageHeight: out.pageHeight, ended: out.ended, took: ts() });
   } catch (e) {
     send({ error: e.code === 'LOCAL' || /blockedbyclient/.test(String(e)) ? LOCAL_MSG : String(e.message || e).split('\n')[0] });
   } finally {
