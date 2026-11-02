@@ -1,0 +1,64 @@
+{
+  "name": "mockup-studio-desktop",
+  "productName": "Mockup Studio",
+  "version": "1.0.0",
+  "description": "Mockup Studio for macOS (Apple Silicon): 3D laptop video mockups, website recording and MP4 export",
+  "author": "Mockup Studio",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "sync": "node scripts/sync.mjs",
+    "start": "npm run sync && electron .",
+    "dist": "npm run sync && electron-builder --mac --arm64"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "puppeteer-core": "^25.16.0"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.mockupstudio.app",
+    "productName": "Mockup Studio",
+    "copyright": "Mockup Studio",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "web/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.video",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
+    },
+    "dmg": {
+      "title": "Mockup Studio",
+      "icon": "build/icon.icns"
+    },
+    "afterPack": "scripts/adhoc-sign.cjs"
+  }
+}

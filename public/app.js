@@ -46,13 +46,13 @@ const defaults = () => ({
   text: '', font: '700 Inter, Helvetica, Arial, sans-serif', textColor: '#ffffff', textSize: 0.09, textX: 0, textY: -0.8, bodyColor: null, exposure: 0.95, env: 1.1, key: 1.5, keyAz: -35, keyColor: '#fff4e6',
   fill_: 0.15, shadow: 0.55,
   // export
-  autoFit: true, dribShadow: 0, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  autoFit: true, interact: 2, dribShadow: 0, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
 let dirHandle = null, lastSaved = '';
-const hadSaved = !!localStorage.getItem('mockup-studio-v23');
-const LS_KEY = 'mockup-studio-v23';
+const hadSaved = !!localStorage.getItem('mockup-studio-v24');
+const LS_KEY = 'mockup-studio-v24';
 try { Object.assign(S, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch {}
 const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch {} };
 S.cams = { ...JSON.parse(JSON.stringify(CAM_DEF)), ...S.cams };
@@ -484,7 +484,7 @@ async function captureSite(url, mode, dur, btn, speed = 350) {
       }
     }
     const r = await fetch(base + '/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, mode, duration: dur, speed, ...size }) });
+      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, ...size }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Capture failed');
     if (j.kind === 'frames') await loadFrames(base + j.url, new URL(url).host);
@@ -954,6 +954,8 @@ $('btnSaveProject').onclick = () => {
   const urlIn = el('input', { type: 'text', placeholder: 'https://your-website.com', spellcheck: false }); field(m, 'Link', urlIn, 'wide');
   let dur = 0, spd = 350;
   slider(m, 'Scroll length', { get: () => dur, set: (v) => { dur = v; }, min: 0, max: 40, fmt: (v) => (v ? v + 's' : 'Auto') });
+  selectField(m, 'Pauses & hovers', { get: () => String(S.interact), set: (v) => { S.interact = +v; }, options: [['0', 'Off — plain scroll'], ['1', 'Light'], ['2', 'Natural'], ['3', 'Lively']] });
+  note(m, 'While recording, it now and then pauses and points at things on the page (menu, buttons, cards, images, accordions), picked at random from the site’s structure. Never clicks links.');
   slider(m, 'Auto scroll speed', { get: () => spd, set: (v) => { spd = v; }, min: 120, max: 900, step: 10, fmt: (v) => v + ' px/s' });
   const row = el('div', { className: 'row2' }); m.append(row);
   btn(row, 'Record scroll', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');

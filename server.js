@@ -8,7 +8,9 @@ import puppeteer from 'puppeteer-core';
 import { recordPage } from './lib/record.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const capDir = path.join(root, 'captures');
+// In the packaged Mac app the code lives in a read-only bundle, so recordings / exports go to writable folders passed in by the app.
+const dataDir = process.env.MOCKUP_DATA_DIR || root;                       // relative export folders (e.g. "renders") resolve here
+const capDir = process.env.MOCKUP_CAPTURES_DIR || path.join(root, 'captures');
 fs.mkdirSync(capDir, { recursive: true });
 
 const app = express();
@@ -39,7 +41,7 @@ const expand = (d) => {
   d = String(d || '').trim();
   if (!d) return os.homedir();
   if (d.startsWith('~')) d = path.join(os.homedir(), d.slice(1));
-  return path.resolve(root, d);
+  return path.resolve(dataDir, d);
 };
 app.get('/api/folders', (req, res) => {
   let dir = expand(req.query.dir);
@@ -52,7 +54,7 @@ app.get('/api/folders', (req, res) => {
   } catch {}
   const places = ['Desktop', 'Movies', 'Downloads', 'Documents', 'Pictures']
     .map((n) => ({ name: n, path: path.join(os.homedir(), n) })).filter((p) => fs.existsSync(p.path));
-  res.json({ path: dir, parent: path.dirname(dir), dirs, home: os.homedir(), places, project: root });
+  res.json({ path: dir, parent: path.dirname(dir), dirs, home: os.homedir(), places, project: dataDir });
 });
 app.post('/api/mkdir', (req, res) => {
   try {
@@ -77,7 +79,7 @@ app.post('/api/save', express.raw({ type: '*/*', limit: '4gb' }), (req, res) => 
     const name = path.basename(String(req.query.name || 'mockup.mp4'));
     let dir = String(req.query.dir || 'renders').trim() || 'renders';
     if (dir.startsWith('~')) dir = path.join(process.env.HOME || '', dir.slice(1));
-    dir = path.resolve(root, dir);
+    dir = path.resolve(dataDir, dir);
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, name);
     fs.writeFileSync(file, req.body);
@@ -93,7 +95,7 @@ const CHROME = process.env.CHROME_PATH || [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
 ].find((p) => fs.existsSync(p));
 app.post('/api/capture', async (req, res) => {
-  const { url, mode = 'scroll', duration = 0, speed = 350, width = 1440, height = 900 } = req.body || {};
+  const { url, mode = 'scroll', duration = 0, speed = 350, width = 1440, height = 900, interact = 0 } = req.body || {};
   let target;
   try {
     target = new URL(url);
@@ -110,7 +112,7 @@ app.post('/api/capture', async (req, res) => {
     const frames = [];
     let t0 = null;
     const out = await recordPage({
-      browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 350, width, height,
+      browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 350, width, height, interact: Number(interact) || 0,
       maxScrollSec: 150, warmupMs: 20000, gotoMs: 45000, quality: 80, minFrameGap: 1 / 60,
       onFrame: ({ ts, data }) => {
         if (t0 === null) { t0 = ts; fs.mkdirSync(dir, { recursive: true }); }
@@ -133,5 +135,15 @@ app.post('/api/capture', async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 4173;
-app.listen(port, '127.0.0.1', () => console.log(`Mockup Studio → http://localhost:${port}`));
+/** Starts the app server. Resolves with the port in use (tries `port`, then any free port). */
+export function startServer(port = Number(process.env.PORT) || 4173) {
+  return new Promise((resolve, reject) => {
+    const tryListen = (p) => {
+      const srv = app.listen(p, '127.0.0.1', () => { const used = srv.address().port; console.log(`Mockup Studio → http://localhost:${used}`); resolve(used); });
+      srv.on('error', (e) => { if (e.code === 'EADDRINUSE' && p !== 0) tryListen(0); else reject(e); });
+    };
+    tryListen(port);
+  });
+}
+// `npm start` runs this file directly; the Mac app imports startServer() instead.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) startServer();

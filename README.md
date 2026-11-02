@@ -24,3 +24,16 @@ The local app adds **website recording** (`localhost:3000`, any link — uses th
 
 - 3D models and textures are in `public/models` and `public/textures` (`blender/` has the scripts that generated the table, wall and surface textures).
 - The device and background models come from third-party mockup files. Check their licences before making this repository or site public.
+
+## Mac app (Apple Silicon)
+
+`desktop/` wraps the local app in a native macOS window (Electron). It has every local feature: recording any link or `localhost` page with your own Google Chrome (with natural pauses and hovers), folder export, no time limits.
+
+```bash
+npm install && npm run build         # in the project root
+cd desktop && npm install
+node node_modules/electron/install.js   # if Electron's runtime didn't unpack: unzip the cached archive with `ditto -x -k`
+npm run dist                          # → desktop/dist/Mockup Studio-1.0.0-arm64.dmg (+ .zip)
+```
+
+The app is signed ad hoc (no Apple Developer account), so the first time: right-click → Open, or System Settings → Privacy & Security → *Open Anyway*. Exports default to `~/Movies/Mockup Studio`. Requires Google Chrome.
