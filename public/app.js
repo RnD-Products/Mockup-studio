@@ -316,7 +316,7 @@ const frameIdx = (t) => { const f = src.frames; let lo = 0, hi = f.length - 1; w
 function loadFrame(i) {
   let e = frameCache.get(i);
   if (!e) {
-    const im = new Image(); const p = new Promise((r) => { im.onload = () => r(im); im.onerror = () => r(im); }); im.src = src.frames[i].url;
+    const im = new Image(); im.crossOrigin = 'anonymous'; const p = new Promise((r) => { im.onload = () => r(im); im.onerror = () => r(im); }); im.src = src.frames[i].url;
     e = { im, p }; frameCache.set(i, e);
     if (frameCache.size > 80) frameCache.delete(frameCache.keys().next().value);
   }
@@ -427,26 +427,9 @@ async function loadFile(file) {
   } catch (e) { setStatus(e.message, true); }
 }
 
-let screenRec = null;
-/** record any browser tab / window (works for localhost pages and on the hosted site) */
-async function toggleScreenRecord(btn) {
-  if (screenRec) { screenRec.stop(); return; }
-  if (!navigator.mediaDevices?.getDisplayMedia) return setStatus('Screen recording is not supported in this browser (use Chrome or Edge).', true);
-  let stream;
-  try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false }); }
-  catch { return setStatus('Screen sharing was cancelled.', true); }
-  const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t));
-  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6 }), chunks = [], t0 = performance.now();
-  screenRec = rec; btn.textContent = '■ Stop recording';
-  const timer = setInterval(() => setStatus(`● Recording… ${((performance.now() - t0) / 1000).toFixed(0)}s. Scroll your page, then press “Stop recording”.`), 400);
-  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-  stream.getVideoTracks()[0].addEventListener('ended', () => { if (rec.state !== 'inactive') rec.stop(); });
-  rec.onstop = async () => {
-    clearInterval(timer); stream.getTracks().forEach((t) => t.stop()); screenRec = null; btn.textContent = '● Record screen';
-    try { await loadVideoURL(URL.createObjectURL(new Blob(chunks, { type: 'video/webm' })), { label: 'Screen recording' }); }
-    catch (e) { setStatus(e.message, true); }
-  };
-  rec.start(1000);
+const HELPER = 'http://localhost:4173';   // the local app (npm start), which can reach pages on this computer
+async function findHelper() {
+  try { const r = await fetch(HELPER + '/api/ping', { mode: 'cors' }); return r.ok && !!(await r.json()).helper; } catch { return false; }
 }
 async function captureSite(url, mode, dur, btn, speed = 350) {
   if (!url) return setStatus('Paste a website link first.', true);
@@ -455,18 +438,26 @@ async function captureSite(url, mode, dur, btn, speed = 350) {
   btn.disabled = true; setStatus(mode === 'scroll' ? `Recording ${url} … ${dur ? `(≈${dur + 6}s)` : '(auto-detecting scroll length)'}` : `Taking screenshot of ${url} …`);
   try {
     const host = new URL(url).host, size = { width: 1440, height: S.layout === 'd' ? 1040 : 900 };
-    if (!hasServer) {                                           // hosted: use the serverless recorder (public sites only)
-      if (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|[\w-]+\.local)(:|\/|$)/i.test(host + '/')) throw new Error('This page only exists on your computer, so the hosted server cannot open it. Use “Record screen” below (share the tab), or run the app locally (npm start).');
-      await captureHosted({ url, mode, duration: dur, speed, ...size }, host);
-      btn.disabled = false; return;
+    let base = '';
+    if (!hasServer) {
+      if (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|[\w-]+\.local)(:|\/|$)/i.test(host + '/')) {
+        // a page on THIS computer: the hosted server can't see it, so ask the local app to record it
+        setStatus('Looking for the local app on this computer…');
+        if (!(await findHelper())) throw new Error('To record a localhost page from the live site, start the local app first: open Terminal in the mockup-studio folder and run  npm start  (keep it running). Allow the browser to connect to local devices if it asks, then try again.');
+        base = HELPER;
+        setStatus(`Recording ${url} through the local app…`);
+      } else {                                                  // a public website: the hosted recorder does it
+        await captureHosted({ url, mode, duration: dur, speed, ...size }, host);
+        btn.disabled = false; return;
+      }
     }
-    const r = await fetch('/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const r = await fetch(base + '/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, mode, duration: dur, speed, ...size }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || 'Capture failed');
-    if (j.kind === 'frames') await loadFrames(j.url, new URL(url).host);
-    else if (j.kind === 'image') await loadImageURL(j.url, new URL(url).host);
-    else await loadVideoURL(j.url, { start: j.start, end: j.start + j.length, label: new URL(url).host });
+    if (j.kind === 'frames') await loadFrames(base + j.url, new URL(url).host);
+    else if (j.kind === 'image') await loadImageURL(base + j.url, new URL(url).host);
+    else await loadVideoURL(base + j.url, { start: j.start, end: j.start + j.length, label: new URL(url).host });
   } catch (e) { setStatus(e.message, true); }
   btn.disabled = false;
 }
@@ -935,8 +926,7 @@ $('btnSaveProject').onclick = () => {
   const row = el('div', { className: 'row2' }); m.append(row);
   btn(row, 'Record scroll', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
   btn(row, 'Screenshot', (b) => captureSite(urlIn.value.trim(), 'screenshot', dur, b));
-  btn(m, '● Record screen', (b) => toggleScreenRecord(b));
-  note(m, 'Record screen: share the browser tab that shows your page (works for localhost and any site), scroll it yourself, then press Stop.');
+  note(m, 'Works with any link: live websites and localhost pages (e.g. localhost:3000).');
   selectField(m, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit'], ['stretch', 'Stretch']] });
   colorField(m, 'Letterbox', A('fill'));
   slider(m, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 2, step: 0.05, fmt: (v) => v + '×' });

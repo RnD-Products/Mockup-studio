@@ -11,11 +11,27 @@ const capDir = path.join(root, 'captures');
 fs.mkdirSync(capDir, { recursive: true });
 
 const app = express();
+app.use(express.json());
+
+// The hosted site (Vercel) can ask THIS local app to record localhost pages. Only your own site (and localhost) may call it.
+const originOk = (o) => !!o && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o) ||
+  /^https:\/\/mockup-studio(-[a-z0-9-]+)?-reng-studio\.vercel\.app$/.test(o) ||
+  (process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean).includes(o));
+app.use((req, res, next) => {
+  const o = req.headers.origin;
+  if (originOk(o)) {
+    res.setHeader('Access-Control-Allow-Origin', o); res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS'); res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
+app.get('/api/ping', (req, res) => res.json({ helper: true }));
 app.use('/vendor/three', express.static(path.join(root, 'node_modules/three')));
 app.use('/vendor/mp4-muxer', express.static(path.join(root, 'node_modules/mp4-muxer/build')));
 app.use('/captures', express.static(capDir));
 app.use(express.static(path.join(root, 'public')));
-app.use(express.json());
 
 // ---- folder browsing for the export dialog (local machine only)
 const expand = (d) => {

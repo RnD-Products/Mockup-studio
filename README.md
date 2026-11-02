@@ -16,7 +16,7 @@ The local app adds **website recording** (`localhost:3000`, any link — uses th
 `npm run build` copies the browser libraries into `public/vendor`; Vercel serves `public/` and runs `api/capture.js` as a serverless function.
 
 - **Website recording of public links** works on the hosted site: `api/capture.js` opens the page in headless Chromium (`@sparticuz/chromium`) and streams the frames back. It refuses localhost / private-network addresses, and a recording is limited to about 22 s of scrolling (the function limit is 60 s).
-- **Pages on your own computer (localhost)** can't be reached from a hosted server. Use the **Record screen** button (share the tab and scroll it yourself), or run the app locally.
+- **Pages on your own computer (`localhost:3000` …)**: a hosted server can't reach them, so the live site hands them to the **local app**. Keep `npm start` running on your computer, paste the localhost link on the live site and press *Record scroll*. (Chrome may ask to allow connecting to local devices — allow it.) The local app only answers your own site and `localhost` (see `ALLOWED_ORIGINS` in `server.js` for a custom domain).
 - The folder picker is local-only; on the hosted site MP4s download to the browser's Downloads folder. MP4 export needs a browser with WebCodecs (Chrome, Edge, Safari 17+).
 - If the site asks you to log in to Vercel, turn off *Deployment Protection → Vercel Authentication* in the project settings.
 
