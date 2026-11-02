@@ -1,0 +1,5 @@
+# local-only: the Node server (website recording, save-to-folder) is not part of the static site
+server.js
+captures
+renders
+blender
