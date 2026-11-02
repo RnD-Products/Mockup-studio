@@ -1,0 +1,8 @@
+node_modules/
+public/vendor/
+captures/
+renders/
+picked-folder/
+*.log
+.DS_Store
+.vercel/
