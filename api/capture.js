@@ -5,7 +5,7 @@ import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 import dns from 'node:dns/promises';
 import net from 'node:net';
-import { recordPage } from '../lib/record.js';
+import { recordPage, capturePageTiles } from '../lib/record.js';
 
 const LOCAL_MSG = "That address is only reachable from your own computer, so the live site can't open it directly. Start the local app (run npm start in the mockup-studio folder) and try again: the live site then uses it automatically.";
 const localErr = () => Object.assign(new Error(LOCAL_MSG), { code: 'LOCAL' });
@@ -67,24 +67,29 @@ export default async function handler(req, res) {
       executablePath: local ? process.env.CHROME_PATH : await chromium.executablePath(),
       headless: local ? true : 'shell',
     });
-    const out = await recordPage({
-      browser, url: target.href, mode, duration, speed, width: vw, height: vh,
-      maxScrollSec: 20, warmupMs: 3000, gotoMs: 15000, quality: 45, minFrameGap: 0.066, skipIdle: true,   // fits Vercel's 60 s function limit
-      prepare: async (page) => {
-        await page.setRequestInterception(true);
-        page.on('request', async (r) => {                                  // never let the page reach private networks
-          try { await assertPublicHost(new URL(r.url()).hostname); r.continue(); } catch { r.abort('blockedbyclient').catch(() => {}); }
-        });
-      },
-      onFrame: ({ ts, data }) => send({ t: ts, f: data }),
-      onInfo: (m) => send({ info: `${m} · ${ts()}` }),
-    });
-    if (out.image) send({ image: Buffer.from(out.image).toString('base64') });
-    else send({ done: true, length: out.length, frames: out.frames, pageHeight: out.pageHeight, ended: out.ended, took: ts() });
+    const prepare = async (page) => {
+      await page.setRequestInterception(true);
+      page.on('request', async (r) => {                                  // never let the page reach private networks
+        try { await assertPublicHost(new URL(r.url()).hostname); r.continue(); } catch { r.abort('blockedbyclient').catch(() => {}); }
+      });
+    };
+    const onInfo = (m) => send({ info: `${m} · ${ts()}` });
+    if (mode === 'screenshot') {
+      const out = await recordPage({ browser, url: target.href, mode, width: vw, height: vh, gotoMs: 15000, skipIdle: true, prepare, onInfo });
+      send({ image: Buffer.from(out.image).toString('base64') });
+    } else {
+      // The hosted machine is small, so a live screen recording would be choppy. Capture the whole page as tall image
+      // tiles instead; the app scrolls through them smoothly (fast, smooth, any page length).
+      const out = await capturePageTiles({
+        browser, url: target.href, width: vw, height: vh, budgetMs: 30000, warmupMs: 3500, gotoMs: 15000, quality: 72, skipIdle: true,
+        prepare, onInfo, onTile: (t) => send({ tile: t.data, y: t.y, h: t.h }),
+      });
+      send({ done: true, ...out, took: ts() });
+    }
   } catch (e) {
     send({ error: e.code === 'LOCAL' || /blockedbyclient/.test(String(e)) ? LOCAL_MSG : String(e.message || e).split('\n')[0] });
   } finally {
-    if (browser) await browser.close().catch(() => {});
-    res.end();
+    res.end();                                                              // the user already has everything: don't make them wait for the browser to shut down
+    if (browser) { await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 2500))]); try { browser.process()?.kill('SIGKILL'); } catch {} }
   }
 }

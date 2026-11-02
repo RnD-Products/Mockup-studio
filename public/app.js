@@ -335,7 +335,7 @@ async function loadFrames(url, label) {
 async function captureHosted(body, host) {
   const r = await fetch('/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `The recording service answered ${r.status}. Try again, or run the app locally.`); }
-  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', t0 = null, length = 0; const frames = [];
+  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', t0 = null, length = 0, meta = null; const frames = [], tiles = [];
   for (;;) {
     const { done, value } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -345,19 +345,45 @@ async function captureHosted(body, host) {
       if (m.error) throw new Error(m.error);
       if (m.info) { setStatus(`${m.info} (${host})`); continue; }
       if (m.image) { await loadImageURL('data:image/jpeg;base64,' + m.image, host); return; }
+      if (m.tile) {
+        const bin = atob(m.tile), arr = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
+        const img = new Image(); img.src = URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+        tiles.push({ y: m.y, h: m.h, img, ready: img.decode().catch(() => {}) });
+        setStatus(`Capturing ${host}… ${tiles.length} part${tiles.length > 1 ? 's' : ''}`);
+      }
       if (m.f) {
         if (t0 === null) t0 = m.t;
         const bin = atob(m.f), arr = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
         frames.push({ t: m.t - t0, url: URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' })) });
         if (frames.length % 10 === 0) setStatus(`Recording ${host}… ${frames.length} frames received`);
       }
-      if (m.done) length = m.length;
+      if (m.done) { length = m.length; meta = m; }
     }
   }
+  if (tiles.length && meta) { await Promise.all(tiles.map((t) => t.ready)); useScrollImage(tiles, meta, host, body.duration, body.speed); return; }
   if (!frames.length) throw new Error('The recording came back empty. Try again.');
   useFrames(frames, length || frames[frames.length - 1].t + 0.25, host);
 }
 
+/* page-image source (hosted capture): the app scrolls smoothly through tall page screenshots */
+const vpCanvas = document.createElement('canvas');
+function scrollYAt(t) {                    // trapezoid speed profile: ease in, steady, ease out
+  const T = src.end, t0 = 0.5, Tm = Math.max(0.5, T - 0.8 - t0), ramp = Math.min(0.7, Tm / 3), v = src.maxY / Math.max(0.1, Tm - ramp);
+  const u = Math.min(Tm, Math.max(0, t - t0));
+  if (src.maxY <= 0) return 0;
+  if (u < ramp) return v * u * u / (2 * ramp);
+  if (u < Tm - ramp) return v * (ramp / 2 + (u - ramp));
+  const d = Tm - u; return src.maxY - v * d * d / (2 * ramp);
+}
+function useScrollImage(tiles, meta, label, dur, speed) {
+  const maxY = Math.max(0, meta.pageHeight - meta.viewH);
+  const T = dur > 0 ? dur : Math.min(90, Math.max(4, maxY / Math.max(80, speed) + 1.6));
+  frameCache.clear(); lastFrameEl = null; video.pause(); video.removeAttribute('src');
+  vpCanvas.width = meta.width; vpCanvas.height = meta.viewH;
+  S.customDur = 0; Object.assign(src, { kind: 'scrollimg', start: 0, end: T, label, tiles, W: meta.width, viewH: meta.viewH, maxY });
+  clock = 0; playing = true; syncPlayBtn();
+  setStatus(`Loaded: ${label} (${Math.round(meta.pageHeight)} px page, ${T.toFixed(1)}s scroll${meta.truncated ? ', first 30,000 px' : ''})`);
+}
 function drawScreen() {
   const W = screenCanvas.width, H = screenCanvas.height;
   sctx.fillStyle = S.fill; sctx.fillRect(0, 0, W, H);
@@ -366,6 +392,11 @@ function drawScreen() {
     if (video.readyState >= 2) { el = video; sw = video.videoWidth; sh = video.videoHeight; }
   } else if (src.kind === 'image' && image) {
     el = image; sw = image.naturalWidth; sh = image.naturalHeight;
+  } else if (src.kind === 'scrollimg') {
+    const y = scrollYAt(clock), g = vpCanvas.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, vpCanvas.width, vpCanvas.height);
+    for (const t of src.tiles) { if (t.y + t.h < y || t.y > y + src.viewH) continue; g.drawImage(t.img, 0, t.y - y); }
+    el = vpCanvas; sw = src.W; sh = src.viewH;
   } else if (src.kind === 'frames') {
     const i = frameIdx(clock), e = loadFrame(i);
     for (let k = 1; k <= 3 && i + k < src.frames.length; k++) loadFrame(i + k);
