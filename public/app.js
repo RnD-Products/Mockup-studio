@@ -343,6 +343,7 @@ async function captureHosted(body, host) {
       const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
       const m = JSON.parse(line);
       if (m.error) throw new Error(m.error);
+      if (m.info) { setStatus(`${m.info} ${host}`); continue; }
       if (m.image) { await loadImageURL('data:image/jpeg;base64,' + m.image, host); return; }
       if (m.f) {
         if (t0 === null) t0 = m.t;
