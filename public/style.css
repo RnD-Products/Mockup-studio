@@ -149,3 +149,9 @@ button.dashed:hover { color: var(--text); border-color: #555; }
 #modeTabs { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; background: var(--bar); border-radius: 12px; padding: 3px; z-index: 5; }
 #modeTabs button { background: none; border: 0; border-radius: 9px; padding: 7px 16px; color: var(--muted); font-weight: 600; }
 #modeTabs button.on { background: #fff; color: #111; }
+
+#btnSpeed { width: auto; min-width: 52px; padding: 0 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#fitBar { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; background: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 12px; padding: 9px 12px; box-shadow: 0 10px 30px #000a; font-size: 12px; max-width: 92%; }
+#fitBar b { font-weight: 600; }
+#fitBar button { border: 0; border-radius: 8px; padding: 6px 11px; background: var(--bar2); }
+#fitBar button.go { background: #fff; color: #111; font-weight: 600; }

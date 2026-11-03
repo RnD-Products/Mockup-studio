@@ -46,13 +46,13 @@ const defaults = () => ({
   text: '', font: '700 Inter, Helvetica, Arial, sans-serif', textColor: '#ffffff', textSize: 0.09, textX: 0, textY: -0.8, bodyColor: null, exposure: 0.95, env: 1.1, key: 1.5, keyAz: -35, keyColor: '#fff4e6',
   fill_: 0.15, shadow: 0.55,
   // export
-  autoFit: true, interact: 2, dribShadow: 0, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
 let dirHandle = null, lastSaved = '';
-const hadSaved = !!localStorage.getItem('mockup-studio-v25');
-const LS_KEY = 'mockup-studio-v25';
+const hadSaved = !!localStorage.getItem('mockup-studio-v26');
+const LS_KEY = 'mockup-studio-v26';
 try { Object.assign(S, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch {}
 const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch {} };
 S.cams = { ...JSON.parse(JSON.stringify(CAM_DEF)), ...S.cams };
@@ -463,13 +463,32 @@ const HELPER = 'http://localhost:4173';   // the local app (npm start), which ca
 async function findHelper() {
   try { const r = await fetch(HELPER + '/api/ping', { mode: 'cors' }); return r.ok && !!(await r.json()).helper; } catch { return false; }
 }
+/** What shape the page should be recorded in: the same shape as the frame it will be shown in, so nothing is cut off at the sides. */
+const frameAspect = () => (S.layout === 'd' ? 1440 / 1040 : (dev?.cfg.aspect || 1.55));
+function captureSize() {
+  if (!S.capAuto) return { width: Math.round(S.capW), height: Math.round(S.capH) };
+  const width = 1440; return { width, height: Math.round(width / frameAspect()) };
+}
+let lastCap = null;
+/** If the recording was made in a different shape than the frame now showing it, offer to re-record to fit. */
+function checkFit() {
+  let bar = document.getElementById('fitBar');
+  const need = lastCap && S.capAuto && ['frames', 'scrollimg', 'image'].includes(src.kind) && Math.abs(lastCap.size.width / lastCap.size.height - frameAspect()) > 0.04;
+  if (!need) { bar?.remove(); return; }
+  const want = captureSize();
+  if (!bar) { bar = el('div', { id: 'fitBar' }); document.getElementById('stage').append(bar); }
+  bar.innerHTML = '';
+  bar.append(el('span', { innerHTML: `Recorded at <b>${lastCap.size.width}×${lastCap.size.height}</b>, this frame is <b>${want.width}×${want.height}</b> — the sides may be cut off.` }),
+    el('button', { className: 'go', textContent: 'Re-record to fit', onclick: () => { bar.remove(); captureSite(lastCap.url, lastCap.mode, lastCap.dur, { set disabled(v) {} }, lastCap.speed); } }),
+    el('button', { textContent: 'Keep', onclick: () => bar.remove() }));
+}
 async function captureSite(url, mode, dur, btn, speed = 700) {
   if (!url) return setStatus('Paste a website link first.', true);
   if (/^:?\d{2,5}$/.test(url)) url = 'http://localhost:' + url.replace(':', '');
   if (!/^https?:\/\//i.test(url)) url = (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+|[\w-]+\.local)(:|\/|$)/i.test(url) ? 'http://' : 'https://') + url;
   btn.disabled = true; setStatus(mode === 'scroll' ? `Recording ${url} … ${dur ? `(≈${dur + 6}s)` : '(auto-detecting scroll length)'}` : `Taking screenshot of ${url} …`);
   try {
-    const host = new URL(url).host, size = { width: 1440, height: S.layout === 'd' ? 1040 : 900 };
+    const host = new URL(url).host, size = captureSize();
     let base = '';
     if (!hasServer) {
       if (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|10\.|192\.168\.|[\w-]+\.local)(:|\/|$)/i.test(host + '/')) {
@@ -480,6 +499,7 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
         setStatus(`Recording ${url} through the local app…`);
       } else {                                                  // a public website: the hosted recorder does it
         await captureHosted({ url, mode, duration: dur, speed, ...size }, host);
+        lastCap = { url, mode, dur, speed, size }; checkFit();
         btn.disabled = false; return;
       }
     }
@@ -490,6 +510,7 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
     if (j.kind === 'frames') await loadFrames(base + j.url, new URL(url).host);
     else if (j.kind === 'image') await loadImageURL(base + j.url, new URL(url).host);
     else await loadVideoURL(base + j.url, { start: j.start, end: j.start + j.length, label: new URL(url).host });
+    lastCap = { url, mode, dur, speed, size }; checkFit();
   } catch (e) { setStatus(e.message, true); }
   btn.disabled = false;
 }
@@ -798,7 +819,7 @@ function setLayout(l) {
   document.querySelectorAll('#modeTabs button').forEach((b) => b.classList.toggle('on', b.dataset.view === (l === 'd' ? 'dribbble' : 'mockup')));
   if (l !== 'd') S.lastLayout = l;
   document.querySelectorAll('button[data-l]').forEach((b) => b.classList.toggle('on', b.dataset.l === l));
-  fitPreview(); buildBackground(); refreshControls();
+  fitPreview(); buildBackground(); refreshControls(); checkFit();
 }
 
 async function switchDevice(id) {
@@ -958,6 +979,13 @@ $('btnSaveProject').onclick = () => {
   note(m, 'While recording, it now and then pauses and points at things on the page (menu, buttons, cards, images, accordions), picked at random from the site’s structure. Never clicks links.');
   slider(m, 'Scroll speed (recording)', { get: () => spd, set: (v) => { spd = v; }, min: 200, max: 2500, step: 50, fmt: (v) => v + ' px/s' });
   seg(m, [[400, 'Slow'], [700, 'Normal'], [1100, 'Fast'], [1800, 'Very fast']], { get: () => spd, set: (v) => { spd = v; } });
+  lbl(m, 'Recording size');
+  checkField(m, 'Match the frame (auto)', { get: () => S.capAuto, set: (v) => { S.capAuto = v; } });
+  const sizeNote = el('p', { className: 'note' }); m.append(sizeNote);
+  slider(m, 'Width', { get: () => S.capW, set: (v) => { S.capW = v; }, min: 800, max: 2560, step: 10, fmt: (v) => v + ' px' });
+  const wEl = m.lastElementChild; slider(m, 'Height', { get: () => S.capH, set: (v) => { S.capH = v; }, min: 500, max: 2000, step: 10, fmt: (v) => v + ' px' });
+  const hEl = m.lastElementChild;
+  refreshers.push(() => { const z = captureSize(); sizeNote.textContent = (S.capAuto ? 'Recording at ' : 'Recording at (manual) ') + z.width + '×' + z.height + (S.layout === 'd' ? ' — the Dribbble frame' : ' — the screen shape'); wEl.style.display = hEl.style.display = S.capAuto ? 'none' : ''; });
   const row = el('div', { className: 'row2' }); m.append(row);
   btn(row, 'Record scroll', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
   btn(row, 'Screenshot', (b) => captureSite(urlIn.value.trim(), 'screenshot', dur, b));
@@ -1160,6 +1188,13 @@ function popover(pop, trigger, build) {
   pop.onclick = (e) => e.stopPropagation();
 }
 document.addEventListener('click', () => document.querySelectorAll('.pop').forEach((p) => { p.hidden = true; }));
+popover($('popSpeed'), $('btnSpeed'), (p) => {
+  lbl(p, 'Video speed');
+  slider(p, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2).replace(/\.?0+$/, '') + '×' });
+  seg(p, [[0.5, '0.5×'], [1, '1×'], [1.5, '1.5×'], [2, '2×'], [3, '3×']], { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); } });
+  note(p, 'Speeds up or slows down the whole recording. The video length follows.');
+});
+refreshers.push(() => { $('btnSpeed').textContent = (+S.speed.toFixed(2)) + '×'; });
 popover($('popMotion'), $('btnMotion'), (p) => {
   lbl(p, 'Camera motion');
   selectField(p, 'Motion', { get: () => S.motion, set: (v) => { S.motion = v; }, options: [['none', 'None'], ['orbit', 'Slow orbit'], ['pushin', 'Push in'], ['pullout', 'Pull out'], ['pan', 'Pan'], ['rise', 'Rise / tilt'], ['float', 'Gentle float']] });
