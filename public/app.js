@@ -477,6 +477,18 @@ function captureSize() {
   const width = 1440; return { width, height: Math.round(width / frameAspect()) };
 }
 let lastCap = null;
+/** one recording per frame shape: the Dribbble frame and the laptop screen are different shapes, so each gets its own full-frame take */
+const shotCache = {};
+const shotKey = () => (S.layout === 'd' ? 'd' : 'm');
+function rememberShot() {
+  if (src.kind === 'frames' && lastCap) shotCache[shotKey()] = { src: { ...src }, cap: lastCap };
+}
+function restoreShot() {
+  const c = shotCache[shotKey()];
+  if (!c || !lastCap || c.cap.url !== lastCap.url || src.kind !== 'frames' || src.frames === c.src.frames) return false;
+  frameCache.clear(); lastFrameEl = null; Object.assign(src, c.src); lastCap = c.cap; clock = 0;
+  setStatus(`Showing the ${S.layout === 'd' ? 'Dribbble' : 'laptop'} recording of ${c.src.label}`); return true;
+}
 
 /* ---- progress bar while recording from a link (with Cancel) ---- */
 let recCtrl = null;
@@ -519,8 +531,8 @@ function checkFit() {
   const want = captureSize();
   if (!bar) { bar = el('div', { id: 'fitBar' }); document.getElementById('stage').append(bar); }
   bar.innerHTML = '';
-  bar.append(el('span', { innerHTML: `Recorded at <b>${lastCap.size.width}×${lastCap.size.height}</b>, this frame is <b>${want.width}×${want.height}</b> — the sides may be cut off.` }),
-    el('button', { className: 'go', textContent: 'Re-record to fit', onclick: () => { bar.remove(); captureSite(lastCap.url, lastCap.mode, lastCap.dur, { set disabled(v) {} }, lastCap.speed); } }),
+  bar.append(el('span', { innerHTML: `Recorded at <b>${lastCap.size.width}×${lastCap.size.height}</b>, this frame is <b>${want.width}×${want.height}</b> — record it separately for this frame so nothing is cut off.` }),
+    el('button', { className: 'go', textContent: S.layout === 'd' ? 'Record for Dribbble' : 'Re-record to fit', onclick: () => { bar.remove(); captureSite(lastCap.url, lastCap.mode, lastCap.dur, { set disabled(v) {} }, lastCap.speed); } }),
     el('button', { textContent: 'Keep', onclick: () => bar.remove() }));
 }
 async function captureSite(url, mode, dur, btn, speed = 700) {
@@ -554,7 +566,7 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
     if (j.kind === 'frames') await loadFrames(base + j.url, new URL(url).host);
     else if (j.kind === 'image') await loadImageURL(base + j.url, new URL(url).host);
     else await loadVideoURL(base + j.url, { start: j.start, end: j.start + j.length, label: new URL(url).host });
-    lastCap = { url, mode, dur, speed, size }; checkFit();
+    lastCap = { url, mode, dur, speed, size }; rememberShot(); checkFit();
   } catch (e) { setStatus(e.name === 'AbortError' ? 'Recording cancelled.' : e.message, e.name !== 'AbortError'); }
   recUI.hide(); recCtrl = null;
   btn.disabled = false;
@@ -864,7 +876,7 @@ function setLayout(l) {
   document.querySelectorAll('#modeTabs button').forEach((b) => b.classList.toggle('on', b.dataset.view === (l === 'd' ? 'dribbble' : 'mockup')));
   if (l !== 'd') S.lastLayout = l;
   document.querySelectorAll('button[data-l]').forEach((b) => b.classList.toggle('on', b.dataset.l === l));
-  fitPreview(); buildBackground(); refreshControls(); checkFit();
+  restoreShot(); fitPreview(); buildBackground(); refreshControls(); checkFit();
 }
 
 async function switchDevice(id) {
