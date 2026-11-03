@@ -474,7 +474,8 @@ async function findHelper() {
 const frameAspect = () => (S.layout === 'd' ? 1440 / 1040 : (dev?.cfg.aspect || 1.55));
 function captureSize() {
   if (!S.capAuto) return { width: Math.round(S.capW), height: Math.round(S.capH) };
-  const width = 1440; return { width, height: Math.round(width / frameAspect()) };
+  const width = 1440, a = frameAspect();   // landscape frames all share one tall take (1440×1040): a wider frame only trims its top/bottom, never the sides
+  return { width, height: Math.round(width / (a >= 1.2 ? Math.min(a, 1440 / 1040) : a)) };
 }
 let lastCap = null;
 /** one recording per frame shape: the Dribbble frame and the laptop screen are different shapes, so each gets its own full-frame take */
@@ -526,7 +527,7 @@ async function readStream(r, onMsg) {
 /** If the recording was made in a different shape than the frame now showing it, offer to re-record to fit. */
 function checkFit() {
   let bar = document.getElementById('fitBar');
-  const need = lastCap && S.capAuto && ['frames', 'scrollimg', 'image'].includes(src.kind) && Math.abs(lastCap.size.width / lastCap.size.height - frameAspect()) > 0.04;
+  const need = lastCap && S.capAuto && ['frames', 'scrollimg', 'image'].includes(src.kind) && lastCap.size.width / lastCap.size.height > frameAspect() + 0.04;   // only a recording WIDER than the frame loses its sides
   if (!need) { bar?.remove(); return; }
   const want = captureSize();
   if (!bar) { bar = el('div', { id: 'fitBar' }); document.getElementById('stage').append(bar); }
