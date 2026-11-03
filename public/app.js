@@ -414,13 +414,9 @@ function drawScreen() {
   if (!el || !sw) return;
   let dw = W, dh = H;
   if (S.fit !== 'stretch') {
-    const k = S.fit === 'cover' ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh);
+    const fills = S.fit === 'cover' || src.kind === 'frames' || src.kind === 'scrollimg';   // site recordings always fill the frame
+    const k = fills ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh);
     dw = sw * k; dh = sh * k;
-    if (S.fit === 'contain' && (dw < W - 1 || dh < H - 1)) {   // no black bars: extend the picture as a blurred backdrop
-      const kc = Math.max(W / sw, H / sh);
-      sctx.save(); sctx.filter = `blur(${Math.round(Math.max(W, H) / 28)}px) brightness(.9)`;
-      sctx.drawImage(el, (W - sw * kc) / 2, (H - sh * kc) / 2, sw * kc * 1.04, sh * kc * 1.04); sctx.restore();
-    }
   }
   sctx.drawImage(el, (W - dw) / 2, (H - dh) / 2, dw, dh);
 }
@@ -1039,7 +1035,7 @@ $('btnSaveProject').onclick = () => {
   btn(row, 'Record scroll', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
   btn(row, 'Screenshot', (b) => captureSite(urlIn.value.trim(), 'screenshot', dur, b));
   note(m, 'Works with any link: live websites and localhost pages (e.g. localhost:3000).');
-  selectField(m, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit (soft edges)'], ['solid', 'Fit (fill colour)'], ['stretch', 'Stretch']] });
+  selectField(m, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit'], ['stretch', 'Stretch']] });
   colorField(m, 'Letterbox', A('fill'));
   lbl(m, 'Playback speed (after recording)');
   slider(m, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2).replace(/\.?0+$/, '') + '×' });
