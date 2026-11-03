@@ -51,8 +51,8 @@ const defaults = () => ({
 });
 let S = defaults();
 let dirHandle = null, lastSaved = '';
-const hadSaved = !!localStorage.getItem('mockup-studio-v24');
-const LS_KEY = 'mockup-studio-v24';
+const hadSaved = !!localStorage.getItem('mockup-studio-v25');
+const LS_KEY = 'mockup-studio-v25';
 try { Object.assign(S, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch {}
 const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch {} };
 S.cams = { ...JSON.parse(JSON.stringify(CAM_DEF)), ...S.cams };
@@ -463,7 +463,7 @@ const HELPER = 'http://localhost:4173';   // the local app (npm start), which ca
 async function findHelper() {
   try { const r = await fetch(HELPER + '/api/ping', { mode: 'cors' }); return r.ok && !!(await r.json()).helper; } catch { return false; }
 }
-async function captureSite(url, mode, dur, btn, speed = 350) {
+async function captureSite(url, mode, dur, btn, speed = 700) {
   if (!url) return setStatus('Paste a website link first.', true);
   if (/^:?\d{2,5}$/.test(url)) url = 'http://localhost:' + url.replace(':', '');
   if (!/^https?:\/\//i.test(url)) url = (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+|[\w-]+\.local)(:|\/|$)/i.test(url) ? 'http://' : 'https://') + url;
@@ -952,18 +952,22 @@ $('btnSaveProject').onclick = () => {
   btn(m, 'Upload video or image…', () => $('fileVideo').click(), 'primary');
   lbl(m, 'Capture a website');
   const urlIn = el('input', { type: 'text', placeholder: 'https://your-website.com', spellcheck: false }); field(m, 'Link', urlIn, 'wide');
-  let dur = 0, spd = 350;
+  let dur = 0, spd = 700;
   slider(m, 'Scroll length', { get: () => dur, set: (v) => { dur = v; }, min: 0, max: 40, fmt: (v) => (v ? v + 's' : 'Auto') });
   selectField(m, 'Pauses & hovers', { get: () => String(S.interact), set: (v) => { S.interact = +v; }, options: [['0', 'Off — plain scroll'], ['1', 'Light'], ['2', 'Natural'], ['3', 'Lively']] });
   note(m, 'While recording, it now and then pauses and points at things on the page (menu, buttons, cards, images, accordions), picked at random from the site’s structure. Never clicks links.');
-  slider(m, 'Auto scroll speed', { get: () => spd, set: (v) => { spd = v; }, min: 120, max: 900, step: 10, fmt: (v) => v + ' px/s' });
+  slider(m, 'Scroll speed (recording)', { get: () => spd, set: (v) => { spd = v; }, min: 200, max: 2500, step: 50, fmt: (v) => v + ' px/s' });
+  seg(m, [[400, 'Slow'], [700, 'Normal'], [1100, 'Fast'], [1800, 'Very fast']], { get: () => spd, set: (v) => { spd = v; } });
   const row = el('div', { className: 'row2' }); m.append(row);
   btn(row, 'Record scroll', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
   btn(row, 'Screenshot', (b) => captureSite(urlIn.value.trim(), 'screenshot', dur, b));
   note(m, 'Works with any link: live websites and localhost pages (e.g. localhost:3000).');
   selectField(m, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit'], ['stretch', 'Stretch']] });
   colorField(m, 'Letterbox', A('fill'));
-  slider(m, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 2, step: 0.05, fmt: (v) => v + '×' });
+  lbl(m, 'Playback speed (after recording)');
+  slider(m, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2).replace(/\.?0+$/, '') + '×' });
+  seg(m, [[0.5, '0.5×'], [1, '1×'], [1.5, '1.5×'], [2, '2×'], [3, '3×']], { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); } });
+  note(m, 'Change this any time after recording: it speeds up or slows down the whole scroll, and the video length follows.');
   slider(m, 'Screen brightness', { ...A('brightness'), min: 0.3, max: 1.4, step: 0.02 });
   checkField(m, 'Loop', { get: () => S.loop, set: (v) => { S.loop = v; } });
 

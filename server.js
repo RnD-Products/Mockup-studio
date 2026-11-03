@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { recordPage } from './lib/record.js';
@@ -94,8 +94,49 @@ const CHROME = process.env.CHROME_PATH || [
   '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser',
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
 ].find((p) => fs.existsSync(p));
+const logFile = path.join(capDir, 'recorder.log');
+const log = (m) => { try { fs.mkdirSync(capDir, { recursive: true }); fs.appendFileSync(logFile, `${new Date().toISOString()} ${m}\n`); } catch {} };
+
+/** Starts Chrome ourselves (headless) and connects to it, so we see exactly what Chrome says when something goes wrong. */
+async function launchChrome(extra = []) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mockup-chrome-'));
+  const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check',
+    '--password-store=basic', '--use-mock-keychain', '--mute-audio', '--hide-scrollbars', '--ignore-certificate-errors',
+    '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
+    '--disable-search-engine-choice-screen', '--disable-sync', '--disable-component-update', ...extra, 'about:blank'];
+  const child = spawn(CHROME, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  const cleanup = () => { try { child.kill('SIGKILL'); } catch {} setTimeout(() => fs.rm(dir, { recursive: true, force: true }, () => {}), 1500); };
+  try {
+    const ws = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Chrome did not start within 25 s')), 25000);
+      child.stderr.on('data', (d) => { err += d; const m = /DevTools listening on (ws:\/\/\S+)/.exec(err); if (m) { clearTimeout(timer); resolve(m[1]); } });
+      child.on('exit', (c) => { clearTimeout(timer); reject(new Error(`Chrome exited while starting (code ${c})`)); });
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    });
+    const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null });
+    browser.on('disconnected', cleanup);
+    return browser;
+  } catch (e) {
+    cleanup();
+    const tail = err.split('\n').map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ').slice(0, 300);
+    throw new Error(`${e.message}${tail ? ` — Chrome said: ${tail}` : ''}`);
+  }
+}
+async function openBrowser() {
+  try { return await launchChrome(); }
+  catch (e1) {
+    log(`Chrome start failed (${e1.message}); retrying in safe graphics mode`);
+    try { return await launchChrome(['--disable-gpu', '--use-gl=swiftshader', '--disable-features=Vulkan']); }
+    catch (e2) {
+      log(`Retry failed too: ${e2.message}`);
+      throw new Error(`Chrome would not start. ${e2.message}. Try quitting Google Chrome completely (⌘Q) and record again.`);
+    }
+  }
+}
+
 app.post('/api/capture', async (req, res) => {
-  const { url, mode = 'scroll', duration = 0, speed = 350, width = 1440, height = 900, interact = 0 } = req.body || {};
+  const { url, mode = 'scroll', duration = 0, speed = 700, width = 1440, height = 900, interact = 0 } = req.body || {};
   let target;
   try {
     target = new URL(url);
@@ -107,12 +148,12 @@ app.post('/api/capture', async (req, res) => {
   const id = Date.now().toString(36);
   let browser;
   try {
-    browser = await puppeteer.launch({ executablePath: CHROME, headless: true, defaultViewport: null, args: ['--hide-scrollbars', '--ignore-certificate-errors'] });
+    browser = await openBrowser();
     const dir = path.join(capDir, id);
     const frames = [];
     let t0 = null;
     const out = await recordPage({
-      browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 350, width, height, interact: Number(interact) || 0,
+      browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 700, width, height, interact: Number(interact) || 0,
       maxScrollSec: 150, warmupMs: 20000, gotoMs: 45000, quality: 80, minFrameGap: 1 / 60,
       onFrame: ({ ts, data }) => {
         if (t0 === null) { t0 = ts; fs.mkdirSync(dir, { recursive: true }); }
@@ -129,9 +170,10 @@ app.post('/api/capture', async (req, res) => {
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ length: out.length, frames }));
     res.json({ kind: 'frames', url: `/captures/${id}/manifest.json`, length: out.length, count: frames.length, pageHeight: out.pageHeight, ended: out.ended });
   } catch (e) {
+    log(`capture of ${url} failed: ${e.message}`);
     res.status(500).json({ error: String(e.message || e).split('\n')[0] });
   } finally {
-    if (browser) await browser.close().catch(() => {});
+    if (browser) { await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 4000))]); try { browser.disconnect(); } catch {} }
   }
 });
 
