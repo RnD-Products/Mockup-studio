@@ -155,3 +155,11 @@ button.dashed:hover { color: var(--text); border-color: #555; }
 #fitBar b { font-weight: 600; }
 #fitBar button { border: 0; border-radius: 8px; padding: 6px 11px; background: var(--bar2); }
 #fitBar button.go { background: #fff; color: #111; font-weight: 600; }
+
+#recBar { position: fixed; left: 50%; bottom: 172px; transform: translateX(-50%); z-index: 40; width: min(520px, 92vw); background: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 14px; padding: 12px 14px; box-shadow: 0 14px 40px #000b; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
+#recBar .rt { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#recBar .rs { color: var(--muted); font-size: 12px; }
+#recBar .bar { grid-column: 1 / -1; height: 8px; }
+#recBar .fill { height: 100%; width: 0; background: #fff; border-radius: 4px; transition: width .2s; }
+#recBar .pct { font-variant-numeric: tabular-nums; font-weight: 700; }
+#recBar button { border: 0; border-radius: 8px; padding: 6px 12px; background: var(--bar2); }

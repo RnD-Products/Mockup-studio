@@ -51,8 +51,8 @@ const defaults = () => ({
 });
 let S = defaults();
 let dirHandle = null, lastSaved = '';
-const hadSaved = !!localStorage.getItem('mockup-studio-v26');
-const LS_KEY = 'mockup-studio-v26';
+const hadSaved = !!localStorage.getItem('mockup-studio-v27');
+const LS_KEY = 'mockup-studio-v27';
 try { Object.assign(S, JSON.parse(localStorage.getItem(LS_KEY) || '{}')); } catch {}
 const save = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch {} };
 S.cams = { ...JSON.parse(JSON.stringify(CAM_DEF)), ...S.cams };
@@ -325,17 +325,17 @@ function loadFrame(i) {
 function useFrames(frames, length, label) {
   frameCache.clear(); lastFrameEl = null; video.pause(); video.removeAttribute('src');
   S.customDur = 0; Object.assign(src, { kind: 'frames', start: 0, end: length, label, frames });
-  clock = 0; playing = true; syncPlayBtn(); setStatus(`Loaded: ${label} (${length.toFixed(1)}s recording)`);
+  clock = 0; playing = true; syncPlayBtn(); setStatus(`Loaded: ${label} (${length.toFixed(1)}s recording) · change the speed with the speed button in the timeline`);
 }
 async function loadFrames(url, label) {
   const m = await (await fetch(url)).json(), base = url.replace(/manifest\.json$/, '');
   useFrames(m.frames.map((f) => ({ t: f.t, url: base + f.f })), m.length, label);
 }
 /** hosted site: the /api/capture serverless function streams newline-delimited JSON (frames, then {done}) */
-async function captureHosted(body, host) {
-  const r = await fetch('/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function captureHosted(body, host, signal) {
+  const r = await fetch('/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `The recording service answered ${r.status}. Try again, or run the app locally.`); }
-  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', t0 = null, length = 0, meta = null; const frames = [], tiles = [];
+  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', t0 = null, length = 0, meta = null, needed = 1; const frames = [], tiles = [];
   for (;;) {
     const { done, value } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -343,12 +343,18 @@ async function captureHosted(body, host) {
       const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
       const m = JSON.parse(line);
       if (m.error) throw new Error(m.error);
-      if (m.info) { setStatus(`${m.info} (${host})`); continue; }
+      if (m.info) {
+        setStatus(`${m.info} (${host})`);
+        const px = /Capturing the page \((\d+) px\)/.exec(m.info); if (px) needed = Math.max(1, Math.ceil(+px[1] / 3000));
+        recUI.set(/Starting/.test(m.info) ? 0.05 : /Page loaded/.test(m.info) ? 0.25 : /Measuring/.test(m.info) ? 0.35 : px ? 0.45 : 0.1, m.info.split(' · ')[0]);
+        continue;
+      }
       if (m.image) { await loadImageURL('data:image/jpeg;base64,' + m.image, host); return; }
       if (m.tile) {
         const bin = atob(m.tile), arr = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
         const img = new Image(); img.src = URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
         tiles.push({ y: m.y, h: m.h, img, ready: img.decode().catch(() => {}) });
+        recUI.set(0.45 + 0.5 * Math.min(1, tiles.length / needed), `Capturing the page (${tiles.length} of ~${needed})`);
         setStatus(`Capturing ${host}… ${tiles.length} part${tiles.length > 1 ? 's' : ''}`);
       }
       if (m.f) {
@@ -470,6 +476,40 @@ function captureSize() {
   const width = 1440; return { width, height: Math.round(width / frameAspect()) };
 }
 let lastCap = null;
+
+/* ---- progress bar while recording from a link (with Cancel) ---- */
+let recCtrl = null;
+const recUI = {
+  bar: null,
+  show(title) {
+    this.hide();
+    const fill = el('div', { className: 'fill' }), pct = el('span', { className: 'pct', textContent: '0%' }), sub = el('span', { className: 'rs', textContent: 'Starting…' });
+    this.bar = el('div', { id: 'recBar' }, [
+      el('div', {}, [el('div', { className: 'rt', textContent: title }), sub]),
+      el('div', { style: 'display:flex;gap:12px;align-items:center' }, [pct, el('button', { textContent: 'Cancel', onclick: () => recCtrl?.abort() })]),
+      el('div', { className: 'bar' }, [fill]),
+    ]);
+    this.fill = fill; this.pct = pct; this.sub = sub; document.body.append(this.bar);
+  },
+  set(p, text) { if (!this.bar) return; const v = Math.max(0, Math.min(1, p)); this.fill.style.width = (v * 100).toFixed(1) + '%'; this.pct.textContent = Math.round(v * 100) + '%'; if (text) this.sub.textContent = text; },
+  hide() { this.bar?.remove(); this.bar = null; },
+};
+/** reads a newline-delimited JSON stream; calls onMsg for progress lines and returns the final {done} message */
+async function readStream(r, onMsg) {
+  const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '', final = null;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    for (let i; (i = buf.indexOf('\n')) >= 0;) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
+      const m = JSON.parse(line);
+      if (m.error) throw new Error(m.error);
+      if (m.done) final = m; else onMsg(m);
+    }
+  }
+  if (!final) throw new Error('The recording stopped before it finished. Try again.');
+  return final;
+}
 /** If the recording was made in a different shape than the frame now showing it, offer to re-record to fit. */
 function checkFit() {
   let bar = document.getElementById('fitBar');
@@ -487,6 +527,7 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
   if (/^:?\d{2,5}$/.test(url)) url = 'http://localhost:' + url.replace(':', '');
   if (!/^https?:\/\//i.test(url)) url = (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+|[\w-]+\.local)(:|\/|$)/i.test(url) ? 'http://' : 'https://') + url;
   btn.disabled = true; setStatus(mode === 'scroll' ? `Recording ${url} … ${dur ? `(≈${dur + 6}s)` : '(auto-detecting scroll length)'}` : `Taking screenshot of ${url} …`);
+  recCtrl = new AbortController(); recUI.show(mode === 'scroll' ? `Recording ${url}` : `Screenshot of ${url}`);
   try {
     const host = new URL(url).host, size = captureSize();
     let base = '';
@@ -498,20 +539,23 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
         base = HELPER;
         setStatus(`Recording ${url} through the local app…`);
       } else {                                                  // a public website: the hosted recorder does it
-        await captureHosted({ url, mode, duration: dur, speed, ...size }, host);
+        await captureHosted({ url, mode, duration: dur, speed, ...size }, host, recCtrl.signal);
         lastCap = { url, mode, dur, speed, size }; checkFit();
-        btn.disabled = false; return;
+        recUI.hide(); recCtrl = null; btn.disabled = false; return;
       }
     }
-    const r = await fetch(base + '/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, ...size }) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || 'Capture failed');
+    const r = await fetch(base + '/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: recCtrl.signal,
+      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, stream: true, ...size }) });
+    let j;
+    if ((r.headers.get('content-type') || '').includes('ndjson')) j = await readStream(r, (m) => { if (m.p != null) recUI.set(m.p, m.t); });
+    else { j = await r.json(); if (!r.ok) throw new Error(j.error || 'Capture failed'); }
+    recUI.set(1, 'Loading the recording…');
     if (j.kind === 'frames') await loadFrames(base + j.url, new URL(url).host);
     else if (j.kind === 'image') await loadImageURL(base + j.url, new URL(url).host);
     else await loadVideoURL(base + j.url, { start: j.start, end: j.start + j.length, label: new URL(url).host });
     lastCap = { url, mode, dur, speed, size }; checkFit();
-  } catch (e) { setStatus(e.message, true); }
+  } catch (e) { setStatus(e.name === 'AbortError' ? 'Recording cancelled.' : e.message, e.name !== 'AbortError'); }
+  recUI.hide(); recCtrl = null;
   btn.disabled = false;
 }
 

@@ -136,7 +136,7 @@ async function openBrowser() {
 }
 
 app.post('/api/capture', async (req, res) => {
-  const { url, mode = 'scroll', duration = 0, speed = 700, width = 1440, height = 900, interact = 0 } = req.body || {};
+  const { url, mode = 'scroll', duration = 0, speed = 700, width = 1440, height = 900, interact = 0, stream = false } = req.body || {};
   let target;
   try {
     target = new URL(url);
@@ -146,15 +146,23 @@ app.post('/api/capture', async (req, res) => {
   }
   if (!CHROME) return res.status(500).json({ error: 'Google Chrome was not found on this computer. Install Chrome, or set CHROME_PATH.' });
   const id = Date.now().toString(36);
+  // progress streaming (newline-delimited JSON) + cancel: if the app closes the request, the recording stops
+  let cancelled = false, lastSent = 0;
+  res.on('close', () => { if (!res.writableFinished) cancelled = true; });
+  if (stream) { res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.flushHeaders?.(); }
+  const emit = (o) => { if (stream && !cancelled) res.write(JSON.stringify(o) + '\n'); };
+  const onProgress = (p, t) => { const now = Date.now(); if (now - lastSent > 150 || p >= 0.97) { lastSent = now; emit({ p: Math.min(0.99, p), t }); } };
+  const finish = (code, obj) => { if (stream) { if (!cancelled) { emit(obj); res.end(); } } else res.status(code).json(obj); };
   let browser;
   try {
+    emit({ p: 0.02, t: 'Starting Chrome' });
     browser = await openBrowser();
     const dir = path.join(capDir, id);
     const frames = [];
     let t0 = null;
     const out = await recordPage({
       browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 700, width, height, interact: Number(interact) || 0,
-      maxScrollSec: 150, warmupMs: 20000, gotoMs: 45000, quality: 80, minFrameGap: 1 / 60,
+      maxScrollSec: 150, warmupMs: 20000, gotoMs: 45000, quality: 80, minFrameGap: 1 / 60, onProgress, isCancelled: () => cancelled,
       onFrame: ({ ts, data }) => {
         if (t0 === null) { t0 = ts; fs.mkdirSync(dir, { recursive: true }); }
         const f = `f${String(frames.length).padStart(5, '0')}.jpg`;
@@ -165,13 +173,13 @@ app.post('/api/capture', async (req, res) => {
     if (out.image) {
       const file = `${id}.jpg`;
       fs.writeFileSync(path.join(capDir, file), out.image);
-      return res.json({ kind: 'image', url: `/captures/${file}` });
+      return finish(200, { done: true, kind: 'image', url: `/captures/${file}` });
     }
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ length: out.length, frames }));
-    res.json({ kind: 'frames', url: `/captures/${id}/manifest.json`, length: out.length, count: frames.length, pageHeight: out.pageHeight, ended: out.ended });
+    finish(200, { done: true, kind: 'frames', url: `/captures/${id}/manifest.json`, length: out.length, count: frames.length, pageHeight: out.pageHeight, ended: out.ended });
   } catch (e) {
-    log(`capture of ${url} failed: ${e.message}`);
-    res.status(500).json({ error: String(e.message || e).split('\n')[0] });
+    if (!cancelled) log(`capture of ${url} failed: ${e.message}`);
+    finish(500, { error: String(e.message || e).split('\n')[0] });
   } finally {
     if (browser) { await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 4000))]); try { browser.disconnect(); } catch {} }
   }
