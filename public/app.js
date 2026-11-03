@@ -413,12 +413,13 @@ function drawScreen() {
   }
   if (!el || !sw) return;
   let dw = W, dh = H;
+  const fills = S.fit === 'cover' || src.kind === 'frames' || src.kind === 'scrollimg';   // site recordings always fill the frame
   if (S.fit !== 'stretch') {
-    const fills = S.fit === 'cover' || src.kind === 'frames' || src.kind === 'scrollimg';   // site recordings always fill the frame
     const k = fills ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh);
     dw = sw * k; dh = sh * k;
   }
-  sctx.drawImage(el, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  const topAnchor = fills && dh > H && ['frames', 'scrollimg', 'image'].includes(src.kind);   // a site shot loses its bottom, never its top (nav bar)
+  sctx.drawImage(el, (W - dw) / 2, topAnchor ? 0 : (H - dh) / 2, dw, dh);
 }
 
 function timeNow() { return src.kind === 'video' ? video.currentTime - src.start : clock; }
