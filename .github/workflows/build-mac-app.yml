@@ -5,6 +5,9 @@ name: Build Mac app
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write              # to attach the app to a draft release
+
 jobs:
   build:
     runs-on: macos-14            # Apple Silicon runner
@@ -42,3 +45,12 @@ jobs:
             desktop/dist/*.zip
           compression-level: 0
           retention-days: 14
+
+      # also attach the files to a draft release (only visible to people with access to the repo), named after the app version
+      - name: Attach to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./desktop/package.json').version")
+          gh release view "mac-v$v" >/dev/null 2>&1 || gh release create "mac-v$v" --draft --target "$GITHUB_SHA" --title "Mockup Studio $v (Mac)" --notes "Apple Silicon build of Mockup Studio $v. Ad-hoc signed: first open with right-click → Open."
+          gh release upload "mac-v$v" desktop/dist/*.dmg desktop/dist/*.zip --clobber
