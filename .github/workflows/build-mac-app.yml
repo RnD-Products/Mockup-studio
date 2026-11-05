@@ -1,0 +1,44 @@
+# Builds the Mockup Studio Mac app (Apple Silicon .dmg + .zip) on a GitHub-hosted Mac.
+# Run it from the Actions tab ("Build Mac app" → Run workflow); the files appear under the run's Artifacts.
+name: Build Mac app
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14            # Apple Silicon runner
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install web app dependencies
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+
+      - name: Prepare static files
+        run: npm run build
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build the .dmg
+        working-directory: desktop
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no Apple Developer certificate: ad-hoc signed by scripts/adhoc-sign.cjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mockup-studio-mac
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+          compression-level: 0
+          retention-days: 14
