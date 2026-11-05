@@ -11,6 +11,7 @@ const rad = THREE.MathUtils.degToRad;
 /* ------------------------------------------------------------------ state */
 const LAYOUTS = {
   p: { label: '3:4', r: 3 / 4 },
+  t: { label: '2:3', r: 2 / 3 },
   v: { label: '9:16', r: 9 / 16 },
   s: { label: '1:1', r: 1 },
   f: { label: '4:3', r: 4 / 3 },
@@ -21,6 +22,7 @@ const CAM_DEF = {
   h: { az: -28, el: 22, dist: 0.78, tx: 0, ty: 0.08, tz: -0.03, fov: 32 },
   v: { az: -30, el: 30, dist: 0.78, tx: 0, ty: 0.09, tz: -0.03, fov: 55 },
   p: { az: -30, el: 22, dist: 0.64, tx: -0.02, ty: 0.075, tz: 0.0, fov: 34 },
+  t: { az: -30, el: 24, dist: 0.7, tx: -0.02, ty: 0.075, tz: 0.0, fov: 40 },
   s: { az: -28, el: 25, dist: 0.8, tx: 0, ty: 0.08, tz: -0.03, fov: 42 },
   f: { az: -28, el: 24, dist: 0.8, tx: 0, ty: 0.08, tz: -0.03, fov: 36 },
   d: { az: -28, el: 24, dist: 0.8, tx: 0, ty: 0.08, tz: -0.03, fov: 36 },
@@ -48,7 +50,7 @@ const defaults = () => ({
   fill_: 0.15, shadow: 0.55,
   // export
   glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0,
-  autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
@@ -190,11 +192,11 @@ function setScreen(aspect, uv = {}, coverAspect = 0) {
   screenMat.needsUpdate = coverMat.needsUpdate = true;
   dribTex?.dispose(); dribTex = new THREE.CanvasTexture(screenCanvas); dribTex.colorSpace = THREE.SRGBColorSpace; dribTex.anisotropy = 8; dribMat.map = dribTex; dribMat.needsUpdate = true;
 }
-let screenIsD = false;
-/** the Dribbble layout shows the content flat at 1440:1040; every other layout uses the device's own panel ratio */
+let screenIsD = '';
+/** the Dribbble layout shows the content flat (inset frame 1440:1040, or the full 1600:1200 canvas); every other layout uses the device's own panel ratio */
 function syncScreen() {
-  const d = S.layout === 'd'; if (d === screenIsD) return; screenIsD = d;
-  if (d) setScreen(1440 / 1040); else setScreen(dev.cfg.aspect, dev.cfg.uv, dev.cfg.cover?.aspect || 0);
+  const d = S.layout === 'd' ? (S.dribFull ? 'df' : 'd') : 'm'; if (d === screenIsD) return; screenIsD = d;
+  if (d === 'df') setScreen(DB.W / DB.H); else if (d === 'd') setScreen(DB.fw / DB.fh); else setScreen(dev.cfg.aspect, dev.cfg.uv, dev.cfg.cover?.aspect || 0);
 }
 
 /* overlays (logo / text) rendered on top in a 2D ortho pass */
@@ -233,9 +235,9 @@ dbScene.add(dribShadow, dribFrame);
 let dribKey = '';
 /** (re)build the frame and its soft shadow for the current corner radius */
 function buildDribFrame() {
-  const rpx = Math.min(DB.rMax, Math.max(0, +S.dribRadius || 0));
-  if (String(rpx) === dribKey) return; dribKey = String(rpx);
-  const U = 2 / DB.H, w = DB.fw * U, h = DB.fh * U, r = Math.min(rpx * U, w / 2, h / 2);
+  const full = !!S.dribFull, rpx = full ? 0 : Math.min(DB.rMax, Math.max(0, +S.dribRadius || 0));   // full frame: the video fills the whole 1600×1200 canvas, square corners
+  if (rpx + '|' + full === dribKey) return; dribKey = rpx + '|' + full;
+  const U = 2 / DB.H, w = (full ? DB.W : DB.fw) * U, h = (full ? DB.H : DB.fh) * U, r = Math.min(rpx * U, w / 2, h / 2);
   const sh = new THREE.Shape();
   if (r > 0) {
     sh.moveTo(-w / 2 + r, -h / 2); sh.lineTo(w / 2 - r, -h / 2);
@@ -553,16 +555,17 @@ async function findHelper() {
   try { const r = await fetch(HELPER + '/api/ping', { mode: 'cors' }); return r.ok && !!(await r.json()).helper; } catch { return false; }
 }
 /** What shape the page should be recorded in: the same shape as the frame it will be shown in, so nothing is cut off at the sides. */
-const frameAspect = () => (S.layout === 'd' ? 1440 / 1040 : (dev?.cfg.aspect || 1.55));
+const frameAspect = () => (S.layout === 'd' ? (S.dribFull ? DB.W / DB.H : DB.fw / DB.fh) : (dev?.cfg.aspect || 1.55));
 function captureSize() {
   if (!S.capAuto) return { width: Math.round(S.capW), height: Math.round(S.capH) };
+  if (S.layout === 'd' && S.dribFull) return { width: DB.W, height: DB.H };   // full-frame Dribbble: record the page at exactly 1600×1200
   const width = 1440, a = frameAspect();   // landscape frames all share one tall take (1440×1040): a wider frame only trims its top/bottom, never the sides
   return { width, height: Math.round(width / (a >= 1.2 ? Math.min(a, 1440 / 1040) : a)) };
 }
 let lastCap = null;
 /** one recording per frame shape: the Dribbble frame and the laptop screen are different shapes, so each gets its own full-frame take */
 const shotCache = {};
-const shotKey = () => (S.layout === 'd' ? 'd' : 'm');
+const shotKey = () => (S.layout === 'd' ? (S.dribFull ? 'df' : 'd') : 'm');
 function rememberShot() {
   if (src.kind === 'frames' && lastCap) shotCache[shotKey()] = { src: { ...src }, cap: lastCap };
 }
@@ -933,7 +936,7 @@ function applyScene() {
   dribMat.color.setScalar(S.brightness);
   dbScene.background = S.bgMode === 'transparent' ? null : S.bgMode === 'original' ? new THREE.Color(0xffffff) : bgTex;
   buildDribFrame();
-  dribShadow.material.opacity = S.dribShadow; dribShadow.visible = S.dribShadow > 0;
+  dribShadow.material.opacity = S.dribShadow; dribShadow.visible = S.dribShadow > 0 && !S.dribFull;
   renderer.toneMappingExposure = S.exposure;
   scene.environmentIntensity = S.env;
   keyLight.intensity = S.key; keyLight.color.set(S.keyColor);
@@ -1115,7 +1118,7 @@ function renderMocks() {
     if (q && !name.toLowerCase().includes(q)) return;
     const id = kind?.startsWith('dev:') ? kind.slice(4) : null;
     ul.append(el('li', { textContent: name, className: kind === 'soon' ? 'soon' : id && id === S.device ? 'on' : '',
-      onclick: () => { if (id) switchDevice(id); else if (kind === 'story') { setLayout('v'); setStatus('Instagram Story → 9:16 layout'); } else if (kind === 'dribbble') { setLayout('d'); setStatus('Dribbble shot → 1600×1200, frame 1440×1040'); } } }));
+      onclick: () => { if (id) switchDevice(id); else if (kind === 'story') { setLayout('v'); setStatus('Instagram Story → 9:16 layout'); } else if (kind === 'dribbble') { setLayout('d'); setStatus(S.dribFull ? 'Dribbble shot → full 1600×1200' : 'Dribbble shot → 1600×1200, frame 1440×1040'); } } }));
   });
 }
 $('search').oninput = renderMocks; renderMocks();
@@ -1214,10 +1217,14 @@ $('btnSaveProject').onclick = () => {
   checkField(m, 'Loop', { get: () => S.loop, set: (v) => { S.loop = v; } });
 
   const db = section(c, 'Dribbble shot', true, 'dribbble');
-  note(db, '1600×1200 canvas with a flat 1440×1040 frame in the centre. Your video or website recording fills the frame.');
+  note(db, 'Inset: a 1440×1040 frame in the centre of the 1600×1200 canvas. Full frame: your video fills the whole 1600×1200 canvas, edge to edge.');
+  lbl(db, 'Frame');
+  seg(db, [[false, 'Inset 1440×1040'], [true, 'Full 1600×1200']], { get: () => !!S.dribFull, set: (v) => { S.dribFull = v; syncScreen(); restoreShot(); applyScene(); checkFit(); } });
+  const i0 = db.children.length;
   slider(db, 'Corner radius', { ...A('dribRadius'), min: 0, max: DB.rMax, step: 1, fmt: (v) => Math.round(v) + ' px' });
   seg(db, [[0, '0'], [16, '16'], [24, '24'], [40, '40'], [64, '64']], { get: () => S.dribRadius, set: (v) => { S.dribRadius = v; applyScene(); } });
   slider(db, 'Frame shadow', { ...A('dribShadow'), min: 0, max: 0.5, step: 0.01 });
+  const insetEls = [...db.children].slice(i0); refreshers.push(() => { insetEls.forEach((e) => { e.style.display = S.dribFull ? 'none' : ''; }); });   // radius & shadow only apply to the inset frame
   lbl(db, 'FPS');
   seg(db, [[15, '15'], [25, '25'], [30, '30'], [60, '60']], { get: () => S.fps, set: (v) => { S.fps = v; } });
   lbl(db, 'Background');
