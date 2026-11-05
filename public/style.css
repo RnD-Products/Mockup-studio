@@ -165,3 +165,21 @@ button.dashed:hover { color: var(--text); border-color: #555; }
 #recBar .fill { height: 100%; width: 0; background: #fff; border-radius: 4px; transition: width .2s; }
 #recBar .pct { font-variant-numeric: tabular-nums; font-weight: 700; }
 #recBar button { border: 0; border-radius: 8px; padding: 6px 12px; background: var(--bar2); }
+
+/* trim (cut the video's start / end) */
+#app.trimming { grid-template-rows: minmax(0, 1fr) 190px; }
+#app.trimming #timeline { grid-template-rows: auto auto auto auto; }
+#btnTrim.on { background: #fff; color: #111; }
+#trimRow { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+#trimRow[hidden] { display: none; }
+#trimRow .tlbl { color: var(--muted); font-weight: 700; }
+#trimBar { position: relative; flex: 1; height: 26px; background: #0d0d0d; border-radius: 6px; cursor: pointer; overflow: hidden; }
+#trimSel { position: absolute; top: 0; bottom: 0; background: #2f6fd833; border: 2px solid #f0c040; border-radius: 6px; box-sizing: border-box; }
+#trimSel .h { position: absolute; top: -2px; bottom: -2px; width: 12px; background: #f0c040; cursor: ew-resize; touch-action: none; }
+#trimSel .h.l { left: -2px; border-radius: 6px 0 0 6px; } #trimSel .h.r { right: -2px; border-radius: 0 6px 6px 0; }
+#trimSel .h::after { content: ""; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 2px; background: #0006; border-radius: 1px; }
+#trimHead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
+#trimInfo { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 150px; }
+.tbtn { background: var(--bar); border: 0; border-radius: 8px; padding: 6px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.tbtn:hover { background: var(--bar2); }
+#app.trimming #playhead { bottom: -38px; }

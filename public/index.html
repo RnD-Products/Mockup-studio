@@ -53,6 +53,7 @@
       <button id="btnMotion" class="sq" title="Motion presets &amp; keyframes">↻</button>
       <button id="btnAdd" class="sq" title="Add video / image">+</button>
       <button id="btnSpeed" class="sq" title="Video speed">1×</button>
+      <button id="btnTrim" class="sq" title="Trim: cut the start or end of the video">✂</button>
       <label class="dur"><input id="durIn" type="number" min="0" max="120" step="1"><span>s</span></label>
       <span id="status" class="status"></span>
       <div class="grow"></div>
@@ -61,6 +62,14 @@
     </div>
     <div id="ruler"><div id="ticks"></div><div id="playhead"><span id="phLabel">0.0s</span></div></div>
     <div id="track"><span>Shot 1</span></div>
+    <div id="trimRow" hidden>
+      <span class="tlbl">Trim</span>
+      <div id="trimBar"><div id="trimSel"><i class="h l" title="Drag to cut the start"></i><i class="h r" title="Drag to cut the end"></i></div><div id="trimHead"></div></div>
+      <span id="trimInfo"></span>
+      <button id="trimIn" class="tbtn" title="Cut everything before the playhead">Start here</button>
+      <button id="trimOut" class="tbtn" title="Cut everything after the playhead">End here</button>
+      <button id="trimReset" class="tbtn" title="Back to the full length">Reset</button>
+    </div>
   </footer>
 </div>
 

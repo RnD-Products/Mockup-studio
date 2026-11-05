@@ -407,7 +407,7 @@ function loadFrame(i) {
 }
 function useFrames(frames, length, label) {
   frameCache.clear(); lastFrameEl = null; video.pause(); video.removeAttribute('src');
-  S.customDur = 0; Object.assign(src, { kind: 'frames', start: 0, end: length, label, frames });
+  S.customDur = 0; Object.assign(src, { full0: null, full1: null, kind: 'frames', start: 0, end: length, label, frames });
   clock = 0; playing = true; syncPlayBtn(); setStatus(`Loaded: ${label} (${length.toFixed(1)}s recording) · change the speed with the speed button in the timeline`);
 }
 async function loadFrames(url, label) {
@@ -457,7 +457,8 @@ async function captureHosted(body, host, signal) {
 /* page-image source (hosted capture): the app scrolls smoothly through tall page screenshots */
 const vpCanvas = document.createElement('canvas');
 function scrollYAt(t) {                    // trapezoid speed profile: ease in, steady, ease out
-  const T = src.end, t0 = 0.5, Tm = Math.max(0.5, T - 0.8 - t0), ramp = Math.min(0.7, Tm / 3), v = src.maxY / Math.max(0.1, Tm - ramp);
+  const T = src.full1 ?? src.end, t0 = 0.5,   // the scroll's own length, even when trimmed
+  Tm = Math.max(0.5, T - 0.8 - t0), ramp = Math.min(0.7, Tm / 3), v = src.maxY / Math.max(0.1, Tm - ramp);
   const u = Math.min(Tm, Math.max(0, t - t0));
   if (src.maxY <= 0) return 0;
   if (u < ramp) return v * u * u / (2 * ramp);
@@ -469,7 +470,7 @@ function useScrollImage(tiles, meta, label, dur, speed) {
   const T = dur > 0 ? dur : Math.min(90, Math.max(4, maxY / Math.max(80, speed) + 1.6));
   frameCache.clear(); lastFrameEl = null; video.pause(); video.removeAttribute('src');
   vpCanvas.width = meta.width; vpCanvas.height = meta.viewH;
-  S.customDur = 0; Object.assign(src, { kind: 'scrollimg', start: 0, end: T, label, tiles, W: meta.width, viewH: meta.viewH, maxY });
+  S.customDur = 0; Object.assign(src, { full0: null, full1: null, kind: 'scrollimg', start: 0, end: T, label, tiles, W: meta.width, viewH: meta.viewH, maxY });
   clock = 0; playing = true; syncPlayBtn();
   setStatus(`Loaded: ${label} (${Math.round(meta.pageHeight)} px page, ${T.toFixed(1)}s scroll${meta.truncated ? ', first 30,000 px' : ''})`);
 }
@@ -482,17 +483,17 @@ function drawScreen() {
   } else if (src.kind === 'image' && image) {
     el = image; sw = image.naturalWidth; sh = image.naturalHeight;
   } else if (src.kind === 'scrollimg') {
-    const y = scrollYAt(clock), g = vpCanvas.getContext('2d');
+    const y = scrollYAt(src.start + clock), g = vpCanvas.getContext('2d');
     g.fillStyle = '#fff'; g.fillRect(0, 0, vpCanvas.width, vpCanvas.height);
     for (const t of src.tiles) { if (t.y + t.h < y || t.y > y + src.viewH) continue; g.drawImage(t.img, 0, t.y - y); }
     el = vpCanvas; sw = src.W; sh = src.viewH;
   } else if (src.kind === 'frames') {
-    const i = frameIdx(clock), e = loadFrame(i);
+    const i = frameIdx(src.start + clock), e = loadFrame(i);
     for (let k = 1; k <= 3 && i + k < src.frames.length; k++) loadFrame(i + k);
     if (e.im.complete && e.im.naturalWidth) lastFrameEl = e.im;
     if (lastFrameEl) { el = lastFrameEl; sw = el.naturalWidth; sh = el.naturalHeight; }
   } else if (src.kind === 'demo') {
-    drawDemo(clock); el = demoCanvas; sw = 1600; sh = 1000;
+    drawDemo(src.start + clock); el = demoCanvas; sw = 1600; sh = 1000;
   }
   if (!el || !sw) return;
   let dw = W, dh = H;
@@ -532,14 +533,14 @@ async function loadVideoURL(url, opts = {}) {
   video.src = url; video.load();
   await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error('Could not load this video')); });
   await fixDuration(video);
-  S.customDur = 0; Object.assign(src, { kind: 'video', start: opts.start || 0, end: opts.end || video.duration, label: opts.label || 'Video' });
+  S.customDur = 0; Object.assign(src, { full0: null, full1: null, kind: 'video', start: opts.start || 0, end: opts.end || video.duration, label: opts.label || 'Video' });
   video.currentTime = src.start; video.playbackRate = S.speed; video.muted = !S.sound;
   playing = true; syncPlayBtn(); setStatus(`Loaded: ${src.label} (${sourceLen().toFixed(1)}s)`);
 }
 async function loadImageURL(url, label = 'Image') {
   image = new Image(); image.crossOrigin = 'anonymous';
   await new Promise((res, rej) => { image.onload = res; image.onerror = () => rej(new Error('Could not load image')); image.src = url; });
-  S.customDur = 0; Object.assign(src, { kind: 'image', start: 0, end: 6, label }); clock = 0; video.removeAttribute('src');
+  S.customDur = 0; Object.assign(src, { full0: null, full1: null, kind: 'image', start: 0, end: 6, label }); clock = 0; video.removeAttribute('src');
   setStatus(`Loaded: ${label}`);
 }
 async function loadFile(file) {
@@ -1387,6 +1388,46 @@ $('fileLogo').onchange = (e) => {
   im.src = URL.createObjectURL(f); e.target.value = '';
 };
 
+/* --- trim: cut the start / end of the source (video, website recording, image or demo) */
+const trimFull = () => { if (src.full0 == null) { src.full0 = src.start; src.full1 = src.end; } return [src.full0, src.full1]; };
+function setTrim(a, b) {
+  const [F0, F1] = trimFull(), min = Math.min(0.3, (F1 - F0) / 2);
+  a = Math.min(Math.max(F0, a), F1 - min); b = Math.min(Math.max(a + min, b), F1);
+  const at = src.start + timeNow();                       // keep the picture where it is when possible
+  src.start = a; src.end = b; S.customDur = 0;
+  const t = Math.min(Math.max(at, a), b) - a;
+  if (src.kind === 'video') video.currentTime = a + t; else clock = t;
+  tickKey = ''; kfKey = ''; showTrim();
+}
+const fmtS = (x) => x.toFixed(1) + 's';
+function showTrim() {
+  const row = $('trimRow'); if (row.hidden) return;
+  const [F0, F1] = src.full0 == null ? [src.start, src.end] : [src.full0, src.full1], L = Math.max(0.001, F1 - F0);
+  Object.assign($('trimSel').style, { left: ((src.start - F0) / L * 100) + '%', width: ((src.end - src.start) / L * 100) + '%' });
+  $('trimHead').style.left = ((src.start + timeNow() - F0) / L * 100) + '%';
+  const k = `${fmtS(src.start - F0)} – ${fmtS(src.end - F0)} · keeps ${fmtS(src.end - src.start)} of ${fmtS(L)}`;
+  if ($('trimInfo').textContent !== k) $('trimInfo').textContent = k;
+}
+$('btnTrim').onclick = () => {
+  const row = $('trimRow'); row.hidden = !row.hidden;
+  $('btnTrim').classList.toggle('on', !row.hidden); $('app').classList.toggle('trimming', !row.hidden);
+  showTrim(); fitPreview();
+};
+$('trimIn').onclick = () => setTrim(src.start + timeNow(), src.end);
+$('trimOut').onclick = () => setTrim(src.start, src.start + timeNow());
+$('trimReset').onclick = () => { const [F0, F1] = trimFull(); setTrim(F0, F1); };
+{
+  const bar = $('trimBar'), at = (e) => { const r = bar.getBoundingClientRect(), [F0, F1] = trimFull(); return F0 + Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (F1 - F0); };
+  let drag = null;
+  bar.onpointerdown = (e) => {
+    drag = e.target.classList.contains('l') ? 'l' : e.target.classList.contains('r') ? 'r' : null;
+    bar.setPointerCapture(e.pointerId);
+    if (!drag) { const t = at(e); if (t >= src.start && t <= src.end) { if (src.kind === 'video') video.currentTime = t; else clock = t - src.start; } }   // click inside the kept part: jump there
+  };
+  bar.onpointermove = (e) => { if (drag === 'l') setTrim(at(e), src.end); else if (drag === 'r') setTrim(src.start, at(e)); };
+  bar.onpointerup = () => { drag = null; };
+}
+
 /* --- timeline */
 const btnPlay = $('btnPlay'), ruler = $('ruler'), durIn = $('durIn');
 const syncPlayBtn = () => { btnPlay.textContent = playing ? '❚❚' : '▶'; };
@@ -1515,7 +1556,7 @@ function frame(ts) {
   if (!userOrbiting) applyCamera(motionOn ? Math.min(1, Math.max(0, (t / S.speed) / timelineLen())) : 0);
   orbit.update();
   if (!exporting) draw();
-  updateTimeline(t);
+  updateTimeline(t); showTrim();
   requestAnimationFrame(frame);
 }
 
@@ -1641,7 +1682,7 @@ async function exportOne(layout, tag) {
       applyAnim(t);
       const st = (t * S.speed) % sourceLen();
       if (src.kind === 'video') await seekTo(video, src.start + st);
-      else { clock = st; if (src.kind === 'frames') await loadFrame(frameIdx(st)).p; }
+      else { clock = st; if (src.kind === 'frames') await loadFrame(frameIdx(src.start + st)).p; }
       drawScreen(); screenTex.needsUpdate = true; if (dribTex) dribTex.needsUpdate = true; if (coverTex) coverTex.needsUpdate = true;
       sampleScreen(i === 0); updateGlow();
       applyCamera(S.motion !== 'none' ? Math.min(1, t / len) : 0);
