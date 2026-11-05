@@ -47,7 +47,7 @@ const defaults = () => ({
   text: '', font: '700 Inter, Helvetica, Arial, sans-serif', textColor: '#ffffff', textSize: 0.09, textX: 0, textY: -0.8, bodyColor: null, exposure: 0.95, env: 1.1, key: 1.5, keyAz: -35, keyColor: '#fff4e6',
   fill_: 0.15, shadow: 0.55,
   // export
-  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null,
+  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1,
   autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
@@ -804,7 +804,7 @@ async function ensureBlock() {
 /* "Studio wood": the domed wood table from the supplied file, with its baked studio-light falloff */
 let studioObj = null, studioLoading = false;
 function placeStudio() {                                       // slide / rotate the table, then drop it so its surface is at y = 0 under the device
-  const m = studioObj; m.rotation.y = rad(S.studioRot); m.position.set(0, 0, S.studioZ); m.updateMatrixWorld(true);
+  const m = studioObj; m.rotation.y = rad(S.studioRot); m.position.set(0, 0, S.studioZ * (S.tableScale || 1)); m.updateMatrixWorld(true);   // table size scales around the device
   const hit = new THREE.Raycaster(new THREE.Vector3(0, 5, 0), new THREE.Vector3(0, -1, 0)).intersectObject(m)[0];
   m.position.y = (hit ? -hit.point.y : 0) - (S.block && blockObj ? blockObj.userData.h * (S.blockScale || 1) * Math.max(0.5, foot.w / 0.391) : 0);
 }
@@ -904,8 +904,18 @@ function applyScene() {
   if (N.Wall.userData.y0 === undefined) N.Wall.userData.y0 = N.Wall.position.y;
   N.Wall.position.y = N.Wall.userData.y0 - drop;                          // wall always starts at the table level
   N.Table.position.y = -drop; if (N.Ground) N.Ground.position.y = (dev.groundBase ?? 0) - drop;
-  N.Wall.position.z = useStudio ? S.studioZ - studioObj.userData.half + 0.01 : N.Wall.userData.z;   // wall meets the table's back edge
-  if (N.Table.visible) {                                                    // flat table: stand the wall right on its back edge (no dark gap behind it)
+  // table size: shrink / grow every table surface around the device (height stays the same)
+  const ts = S.tableScale || 1;
+  N.Table.scale.set(ts, 1, ts);
+  if (N.Ground) { if (!N.Ground.userData.s0) N.Ground.userData.s0 = N.Ground.scale.clone(); N.Ground.scale.set(N.Ground.userData.s0.x * ts, N.Ground.userData.s0.y, N.Ground.userData.s0.z * ts); }
+  if (studioObj) studioObj.scale.set(ts, 1, ts);
+  N.Wall.position.z = useStudio ? (S.studioZ - studioObj.userData.half) * ts + 0.01 : N.Wall.userData.z;   // wall meets the table's back edge
+  if (N.Ground && S.tableShow && useGround && !blockOn && ts < 1) {                            // smaller mockup ground: bring the wall forward to its back edge
+    const wg = N.Wall.geometry; if (!wg.boundingBox) wg.computeBoundingBox();
+    N.Ground.updateMatrixWorld(true); const gb = new THREE.Box3().setFromObject(N.Ground);
+    N.Wall.position.z = Math.max(N.Wall.position.z, gb.min.z - wg.boundingBox.min.z + 0.002);
+  }
+  if (S.tableShow && !useGround && !useStudio && !blockOn) {               // flat table: stand the wall right on its back edge (no dark gap behind it)
     const tg = N.Table.geometry, wg = N.Wall.geometry; if (!tg.boundingBox) tg.computeBoundingBox(); if (!wg.boundingBox) wg.computeBoundingBox();
     N.Wall.position.z = N.Table.position.z + tg.boundingBox.min.z * N.Table.scale.z - wg.boundingBox.min.z + 0.002;
   }
@@ -1303,6 +1313,7 @@ $('btnSaveProject').onclick = () => {
   btn(bg, 'Upload background image…', () => $('fileBg').click());
   lbl(bg, 'Original scene');
   checkField(bg, 'Show table', { get: () => S.tableShow, set: (v) => { S.tableShow = v; S._tableTouched = true; applyScene(); } });
+  slider(bg, 'Table size', { get: () => S.tableScale, set: (v) => { S.tableScale = v; applyScene(); }, min: 0.25, max: 1.5, step: 0.01, fmt: (v) => Math.round(v * 100) + '%' });
   slider(bg, 'Studio table rotation', { get: () => S.studioRot, set: (v) => { S.studioRot = v; applyScene(); }, min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
   slider(bg, 'Studio light position', { get: () => S.studioZ, set: (v) => { S.studioZ = v; applyScene(); }, min: -1.8, max: 2.2, step: 0.02 });
   lbl(bg, 'Bottom block');
