@@ -47,7 +47,7 @@ const defaults = () => ({
   text: '', font: '700 Inter, Helvetica, Arial, sans-serif', textColor: '#ffffff', textSize: 0.09, textX: 0, textY: -0.8, bodyColor: null, exposure: 0.95, env: 1.1, key: 1.5, keyAz: -35, keyColor: '#fff4e6',
   fill_: 0.15, shadow: 0.55,
   // export
-  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1,
+  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0,
   autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
@@ -803,10 +803,19 @@ async function ensureBlock() {
 }
 /* "Studio wood": the domed wood table from the supplied file, with its baked studio-light falloff */
 let studioObj = null, studioLoading = false;
+/* table size / width / depth / rotation: applied to every table around the device (the world origin), on top of each table's own placement */
+const _pv = new THREE.Matrix4(), _ps = new THREE.Matrix4();
+function applyPivot(o, scaleIt = true) {
+  const ts = S.tableScale || 1;
+  _pv.makeRotationY(rad(S.tableRot || 0));
+  if (scaleIt) _pv.multiply(_ps.makeScale(ts * (S.tableW || 1), 1, ts * (S.tableD || 1)));
+  o.matrixAutoUpdate = false; o.updateMatrix(); o.matrix.premultiply(_pv); o.updateMatrixWorld(true);
+}
 function placeStudio() {                                       // slide / rotate the table, then drop it so its surface is at y = 0 under the device
-  const m = studioObj; m.rotation.y = rad(S.studioRot); m.position.set(0, 0, S.studioZ * (S.tableScale || 1)); m.updateMatrixWorld(true);   // table size scales around the device
+  const m = studioObj; m.rotation.y = rad(S.studioRot); m.position.set(0, 0, S.studioZ); applyPivot(m);
   const hit = new THREE.Raycaster(new THREE.Vector3(0, 5, 0), new THREE.Vector3(0, -1, 0)).intersectObject(m)[0];
   m.position.y = (hit ? -hit.point.y : 0) - (S.block && blockObj ? blockObj.userData.h * (S.blockScale || 1) * Math.max(0.5, foot.w / 0.391) : 0);
+  applyPivot(m);
 }
 async function ensureStudio() {
   if (studioObj || studioLoading) return; studioLoading = true;
@@ -898,30 +907,25 @@ function applyScene() {
   if (blockObj) {
     const useAlt = blockOn && S.blockSurface && S.surface !== 'default' && S.surface !== 'studio', alt = blockObj.userData.alt;
     blockObj.visible = blockOn && !useAlt; alt.visible = useAlt && S.tableShow;
-    [blockObj, alt].forEach((o) => { o.scale.setScalar(bs); o.position.set(S.blockX, 0, S.blockZ); });
+    [blockObj, alt].forEach((o) => { o.scale.setScalar(bs); o.position.set(S.blockX, 0, S.blockZ); applyPivot(o, false); });   // the block turns with the table rotation
     blockObj.userData.sh.material.opacity = Math.min(1, S.shadow * 0.9);
   }
   if (N.Wall.userData.y0 === undefined) N.Wall.userData.y0 = N.Wall.position.y;
   N.Wall.position.y = N.Wall.userData.y0 - drop;                          // wall always starts at the table level
   N.Table.position.y = -drop; if (N.Ground) N.Ground.position.y = (dev.groundBase ?? 0) - drop;
-  // table size: shrink / grow every table surface around the device (height stays the same)
-  const ts = S.tableScale || 1;
-  N.Table.scale.set(ts, 1, ts);
-  if (N.Ground) { if (!N.Ground.userData.s0) N.Ground.userData.s0 = N.Ground.scale.clone(); N.Ground.scale.set(N.Ground.userData.s0.x * ts, N.Ground.userData.s0.y, N.Ground.userData.s0.z * ts); }
-  if (studioObj) studioObj.scale.set(ts, 1, ts);
-  N.Wall.position.z = useStudio ? (S.studioZ - studioObj.userData.half) * ts + 0.01 : N.Wall.userData.z;   // wall meets the table's back edge
-  if (N.Ground && S.tableShow && useGround && !blockOn && ts < 1) {                            // smaller mockup ground: bring the wall forward to its back edge
-    const wg = N.Wall.geometry; if (!wg.boundingBox) wg.computeBoundingBox();
-    N.Ground.updateMatrixWorld(true); const gb = new THREE.Box3().setFromObject(N.Ground);
-    N.Wall.position.z = Math.max(N.Wall.position.z, gb.min.z - wg.boundingBox.min.z + 0.002);
-  }
-  if (S.tableShow && !useGround && !useStudio && !blockOn) {               // flat table: stand the wall right on its back edge (no dark gap behind it)
-    const tg = N.Table.geometry, wg = N.Wall.geometry; if (!tg.boundingBox) tg.computeBoundingBox(); if (!wg.boundingBox) wg.computeBoundingBox();
-    N.Wall.position.z = N.Table.position.z + tg.boundingBox.min.z * N.Table.scale.z - wg.boundingBox.min.z + 0.002;
-  }
+  applyPivot(N.Table); if (N.Ground) applyPivot(N.Ground);                 // table size / width / depth / rotation around the device
+  N.Wall.position.z = N.Wall.userData.z;
   N.Table.visible = S.tableShow && !useGround && !useStudio && !blockOn;
   if (studioObj) { studioObj.visible = S.tableShow && useStudio && !blockOn; placeStudio(); studioObj.userData.sh.material.opacity = Math.min(1, S.shadow * 0.9); }
   if (N.Ground) { N.Ground.visible = S.tableShow && useGround && !blockOn; N.Ground.userData.sh.material.opacity = Math.min(1, S.shadow * 0.9); }
+  // stand the wall on the back edge of the visible table, so no dark gap shows between them
+  const wallOn = !blockOn && S.tableShow && (useStudio || useGround || N.Table.visible);
+  if (wallOn) {
+    const wg = N.Wall.geometry; if (!wg.boundingBox) wg.computeBoundingBox();
+    const tobj = useStudio ? studioObj : useGround ? N.Ground : N.Table, tb = new THREE.Box3().setFromObject(tobj, tobj === N.Table);   // exact corners for the flat table (4 points), fast box for the big meshes
+    const z = tb.min.z - wg.boundingBox.min.z + (useStudio ? 0.01 : 0.002);
+    N.Wall.position.z = useGround ? Math.max(N.Wall.userData.z, z) : z;      // the mockup ground may reach behind the usual wall line
+  }
   contactLayers.forEach((m) => { m.visible = !(useGround && S.tableShow) && !blockOn; });
   catcher.visible = !S.tableShow || blockOn; catcher.position.y = 0.0004 - drop;   // with the block on, only a soft shadow remains on the backdrop
   scene.background = original ? new THREE.Color(ip.id === 'none' || ip.map || ip.custom ? 0x141416 : (S.wallColor || ip.color || '#ecdfc8')) : S.bgMode === 'transparent' ? null : bgTex;
@@ -1314,6 +1318,10 @@ $('btnSaveProject').onclick = () => {
   lbl(bg, 'Original scene');
   checkField(bg, 'Show table', { get: () => S.tableShow, set: (v) => { S.tableShow = v; S._tableTouched = true; applyScene(); } });
   slider(bg, 'Table size', { get: () => S.tableScale, set: (v) => { S.tableScale = v; applyScene(); }, min: 0.25, max: 1.5, step: 0.01, fmt: (v) => Math.round(v * 100) + '%' });
+  slider(bg, 'Table width', { get: () => S.tableW, set: (v) => { S.tableW = v; applyScene(); }, min: 0.25, max: 2, step: 0.01, fmt: (v) => Math.round(v * 100) + '%' });
+  slider(bg, 'Table depth', { get: () => S.tableD, set: (v) => { S.tableD = v; applyScene(); }, min: 0.25, max: 2, step: 0.01, fmt: (v) => Math.round(v * 100) + '%' });
+  slider(bg, 'Table rotation', { get: () => S.tableRot, set: (v) => { S.tableRot = v; applyScene(); }, min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
+  btn(bg, 'Reset table size & rotation', () => { Object.assign(S, { tableScale: 1, tableW: 1, tableD: 1, tableRot: 0 }); applyScene(); refreshControls(); save(); });
   slider(bg, 'Studio table rotation', { get: () => S.studioRot, set: (v) => { S.studioRot = v; applyScene(); }, min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
   slider(bg, 'Studio light position', { get: () => S.studioZ, set: (v) => { S.studioZ = v; applyScene(); }, min: -1.8, max: 2.2, step: 0.02 });
   lbl(bg, 'Bottom block');
