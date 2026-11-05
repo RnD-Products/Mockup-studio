@@ -1026,6 +1026,9 @@ function fitLaptop(l = S.layout) {
   c.dist = Math.min(2, Math.max(0.25, R / Math.sin(Math.min(v, h) / 2)));
   c.tx = 0; c.ty = dev.ty; c.tz = 0;
 }
+/** Dribbble: framed (1440×1040 inside the canvas) or full screen (the video fills all 1600×1200, no frame) */
+function setDribFull(v) { S.dribFull = !!v; syncScreen(); restoreShot(); applyScene(); checkFit(); refreshControls(); save(); }
+document.querySelectorAll('#dribFrame button').forEach((b) => b.onclick = () => setDribFull(b.dataset.full === '1'));
 document.querySelectorAll('#modeTabs button').forEach((b) => b.onclick = () => setLayout(b.dataset.view === 'dribbble' ? 'd' : (S.lastLayout && S.lastLayout !== 'd' ? S.lastLayout : 'p')));
 function setLayout(l) {
   if (l !== S.layout && S.autoFit) fitLaptop(l);
@@ -1052,6 +1055,7 @@ const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, kids = []) => { const e = Object.assign(document.createElement(tag), props); kids.forEach((k) => e.append(k)); return e; };
 const refreshers = [];
 const refreshControls = () => refreshers.forEach((f) => f());
+refreshers.push(() => document.querySelectorAll('#dribFrame button').forEach((b) => b.classList.toggle('on', (b.dataset.full === '1') === !!S.dribFull)));
 function setStatus(msg, err = false) { const s = $('status'); s.textContent = msg; s.title = msg; s.classList.toggle('err', err); }
 
 function section(parent, title, open = true, mode = 'both') {
@@ -1217,9 +1221,10 @@ $('btnSaveProject').onclick = () => {
   checkField(m, 'Loop', { get: () => S.loop, set: (v) => { S.loop = v; } });
 
   const db = section(c, 'Dribbble shot', true, 'dribbble');
-  note(db, 'Inset: a 1440×1040 frame in the centre of the 1600×1200 canvas. Full frame: your video fills the whole 1600×1200 canvas, edge to edge.');
+  note(db, 'Framed: a 1440×1040 frame in the centre of the 1600×1200 canvas. Full screen: no frame, your video fills the whole 1600×1200 canvas edge to edge.');
   lbl(db, 'Frame');
-  seg(db, [[false, 'Inset 1440×1040'], [true, 'Full 1600×1200']], { get: () => !!S.dribFull, set: (v) => { S.dribFull = v; syncScreen(); restoreShot(); applyScene(); checkFit(); } });
+  seg(db, [[false, 'Framed 1440×1040'], [true, 'Full screen 1600×1200']], { get: () => !!S.dribFull, set: setDribFull });
+  c.prepend(db.parentElement);   // in the Dribbble view its settings come first (the section is hidden in the Mockup view)
   const i0 = db.children.length;
   slider(db, 'Corner radius', { ...A('dribRadius'), min: 0, max: DB.rMax, step: 1, fmt: (v) => Math.round(v) + ' px' });
   seg(db, [[0, '0'], [16, '16'], [24, '24'], [40, '40'], [64, '64']], { get: () => S.dribRadius, set: (v) => { S.dribRadius = v; applyScene(); } });
