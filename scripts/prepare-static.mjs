@@ -20,6 +20,8 @@ for (const f of [
   'loaders/DRACOLoader.js',
   'environments/RoomEnvironment.js',
   'utils/BufferGeometryUtils.js',
+  'lights/RectAreaLightUniformsLib.js',
+  'lights/RectAreaLightTexturesLib.js',
 ]) copy(`three/examples/jsm/${f}`, `three/examples/jsm/${f}`);
 copy('three/examples/jsm/libs/draco/gltf', 'three/examples/jsm/libs/draco/gltf');
 copy('mp4-muxer/build/mp4-muxer.mjs', 'mp4-muxer/mp4-muxer.mjs');

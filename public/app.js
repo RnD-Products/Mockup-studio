@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 const rad = THREE.MathUtils.degToRad;
@@ -46,7 +47,8 @@ const defaults = () => ({
   text: '', font: '700 Inter, Helvetica, Arial, sans-serif', textColor: '#ffffff', textSize: 0.09, textX: 0, textY: -0.8, bodyColor: null, exposure: 0.95, env: 1.1, key: 1.5, keyAz: -35, keyColor: '#fff4e6',
   fill_: 0.15, shadow: 0.55,
   // export
-  autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null,
+  autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
@@ -66,6 +68,7 @@ const canvas = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;   // used to keep the screen glow on the block's top face
 renderer.shadowMap.type = THREE.PCFShadowMap; // radius-blurred, soft edges
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -86,6 +89,75 @@ keyLight.shadow.radius = 7; keyLight.shadow.bias = -0.0002;
 scene.add(keyLight, keyLight.target);
 const fillLight = new THREE.HemisphereLight(0xbfd0ff, 0x302418, 0.35);
 scene.add(fillLight);
+
+/* screen reflection: the panel lights the keyboard deck and the table in the colour it is currently showing */
+RectAreaLightUniformsLib.init();
+const screenLight = new THREE.RectAreaLight(0xffffff, 0, 0.3, 0.2);
+scene.add(screenLight);
+const glowSample = Object.assign(document.createElement('canvas'), { width: 6, height: 4 });
+const glowCtx = glowSample.getContext('2d', { willReadFrequently: true });
+const glowCol = new THREE.Color(0, 0, 0), glowTarget = new THREE.Color();
+let glowLum = 0, glowDecal = null;
+{
+  const n = 128, c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, n, n);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  glowDecal = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, color: 0x000000 }));
+  glowDecal.rotation.x = -Math.PI / 2; glowDecal.renderOrder = 3;
+  scene.add(glowDecal);
+}
+/** average colour of what the screen shows right now (smoothed so cuts don't flicker) */
+function sampleScreen(snap = false) {
+  glowCtx.drawImage(screenCanvas, 0, 0, glowSample.width, glowSample.height);
+  const d = glowCtx.getImageData(0, 0, glowSample.width, glowSample.height).data;
+  let r = 0, g = 0, b = 0; const n = d.length / 4;
+  for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+  glowTarget.setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace);
+  if (snap) glowCol.copy(glowTarget); else glowCol.lerp(glowTarget, 0.2);
+  glowLum = 0.2126 * glowCol.r + 0.7152 * glowCol.g + 0.0722 * glowCol.b;
+}
+const glowPlanes = [0, 1, 2, 3].map(() => new THREE.Plane()), _glowBox = new THREE.Box3(), _gx = new THREE.Vector3();
+const _gc = new THREE.Vector3(), _gn = new THREE.Vector3(), _gt = new THREE.Vector3(), _gs = new THREE.Vector3();
+/** place the light on the panel (follows the lid / rotation) and the soft glow on the table in front of it */
+function updateGlow() {
+  const m = dev?.screenMesh, on = S.glow > 0 && S.layout !== 'd' && !!m;
+  screenLight.visible = on; glowDecal.visible = on;
+  if (!on) return;
+  if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+  const bb = m.geometry.boundingBox, sz = bb.getSize(_gs);
+  // the thinnest axis of the panel is its normal
+  const ax = sz.x <= sz.y && sz.x <= sz.z ? 'x' : sz.y <= sz.z ? 'y' : 'z';
+  m.updateWorldMatrix(true, false);
+  bb.getCenter(_gc).applyMatrix4(m.matrixWorld);
+  _gn.set(ax === 'x' ? 1 : 0, ax === 'y' ? 1 : 0, ax === 'z' ? 1 : 0).transformDirection(m.matrixWorld);
+  _gt.setFromMatrixPosition(N.Laptop.matrixWorld).sub(_gc);                        // the front of the screen faces the keyboard
+  if (_gn.dot(_gt) < 0) _gn.negate();
+  const ws = new THREE.Vector3().setFromMatrixScale(m.matrixWorld), dims = ['x', 'y', 'z'].filter((k) => k !== ax).map((k) => sz[k] * ws[k]).sort((a, b) => b - a);
+  screenLight.width = dims[0]; screenLight.height = dims[1];
+  screenLight.position.copy(_gc).addScaledVector(_gn, 0.004);
+  screenLight.lookAt(_gt.copy(_gc).add(_gn));
+  const k = S.glow * S.brightness;
+  screenLight.color.copy(glowCol); screenLight.intensity = 7 * k;
+  // table glow: in front of the screen, fading as the device lifts off the surface
+  const lift = Math.max(0, S.py), fade = 1 / (1 + lift * 14), yaw = rad(S.ry);
+  const fw = Math.max(0.2, dims[0] * 1.5), fd = Math.max(0.2, foot.d * 1.6);
+  glowDecal.visible = S.tableShow || (!!blockObj && S.block);
+  glowDecal.scale.set(fw * (1 + lift * 3), fd * (1 + lift * 3), 1);
+  glowDecal.rotation.z = yaw;
+  glowDecal.position.set(S.px + Math.sin(yaw) * foot.d * 0.35, 0.0013, S.pz + Math.cos(yaw) * foot.d * 0.35);
+  // on the concrete block the glow stays on its top face (otherwise it would hang in the air past the edge)
+  const blk = blockObj && S.block ? (blockObj.visible ? blockObj : blockObj.userData.alt) : null;
+  if (blk) {
+    _glowBox.setFromObject(blk);
+    glowPlanes[0].set(_gx.set(1, 0, 0), -_glowBox.min.x); glowPlanes[1].set(_gx.set(-1, 0, 0), _glowBox.max.x);
+    glowPlanes[2].set(_gx.set(0, 0, 1), -_glowBox.min.z); glowPlanes[3].set(_gx.set(0, 0, -1), _glowBox.max.z);
+  }
+  const want = blk ? glowPlanes : null;
+  if (glowDecal.material.clippingPlanes !== want) { glowDecal.material.clippingPlanes = want; glowDecal.material.needsUpdate = true; }
+  glowDecal.material.color.copy(glowCol).multiplyScalar(0.55 * k * fade * Math.min(1, 0.35 + glowLum));
+}
 
 const catcher = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), new THREE.ShadowMaterial({ opacity: 0.5 }));
 catcher.rotation.x = -Math.PI / 2; catcher.position.y = 0.0004; catcher.receiveShadow = true;
@@ -151,24 +223,33 @@ function updateOverlays() {
     const h = S.textSize * 2 * 1.5; textSpr.scale.set(h * textSpr.userData.ar, h, 1); textSpr.position.set(S.textX * as, S.textY, 0);
   }
 }
-/* ---- Dribbble shot: flat 1600×1200 canvas, 1440×1040 frame with 40 px top corners, bottom-aligned (bleeds off the bottom) ---- */
-const DB = { W: 1600, H: 1200, fw: 1440, fh: 1040, top: 160, r: 40 };
+/* ---- Dribbble shot: flat 1600×1200 canvas, 1440×1040 frame centred, the same rounded radius on all four corners ---- */
+const DB = { W: 1600, H: 1200, fw: 1440, fh: 1040, rMax: 200 };
 const dbScene = new THREE.Scene();
-let dribShadow = null;
-{
-  const U = 2 / DB.H, w = DB.fw * U, h = (DB.fh + 12) * U, r = DB.r * U, topY = 1 - DB.top * U;
+const dribFrame = new THREE.Mesh(new THREE.BufferGeometry(), dribMat);
+const dribShadow = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, toneMapped: false }));
+dribShadow.position.set(0, -0.03, -0.1);
+dbScene.add(dribShadow, dribFrame);
+let dribKey = '';
+/** (re)build the frame and its soft shadow for the current corner radius */
+function buildDribFrame() {
+  const rpx = Math.min(DB.rMax, Math.max(0, +S.dribRadius || 0));
+  if (String(rpx) === dribKey) return; dribKey = String(rpx);
+  const U = 2 / DB.H, w = DB.fw * U, h = DB.fh * U, r = Math.min(rpx * U, w / 2, h / 2);
   const sh = new THREE.Shape();
-  sh.moveTo(-w / 2, -h / 2); sh.lineTo(w / 2, -h / 2); sh.lineTo(w / 2, h / 2 - r);
-  sh.absarc(w / 2 - r, h / 2 - r, r, 0, Math.PI / 2, false); sh.lineTo(-w / 2 + r, h / 2);
-  sh.absarc(-w / 2 + r, h / 2 - r, r, Math.PI / 2, Math.PI, false); sh.lineTo(-w / 2, -h / 2);
-  const g = new THREE.ShapeGeometry(sh, 24), p = g.attributes.position, uv = g.attributes.uv, vis = DB.fh * U;
-  for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getX(i) + w / 2) / w, 1 - (h / 2 - p.getY(i)) / vis);
-  const frame = new THREE.Mesh(g, dribMat); frame.position.set(0, topY - h / 2, 0);
-  const spread = 0.07, sg = new THREE.PlaneGeometry(w + 4 * spread, vis + 4 * spread);
-  dribShadow = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, toneMapped: false }));
-  dribShadow.position.set(0, topY - vis / 2 - 0.03, -0.1);
-  dribShadow.userData.make = () => { dribShadow.material.map = shadowTex(w, vis, spread, r); dribShadow.material.needsUpdate = true; };
-  dbScene.add(dribShadow, frame);
+  if (r > 0) {
+    sh.moveTo(-w / 2 + r, -h / 2); sh.lineTo(w / 2 - r, -h / 2);
+    sh.absarc(w / 2 - r, -h / 2 + r, r, -Math.PI / 2, 0, false); sh.lineTo(w / 2, h / 2 - r);
+    sh.absarc(w / 2 - r, h / 2 - r, r, 0, Math.PI / 2, false); sh.lineTo(-w / 2 + r, h / 2);
+    sh.absarc(-w / 2 + r, h / 2 - r, r, Math.PI / 2, Math.PI, false); sh.lineTo(-w / 2, -h / 2 + r);
+    sh.absarc(-w / 2 + r, -h / 2 + r, r, Math.PI, Math.PI * 1.5, false);
+  } else { sh.moveTo(-w / 2, -h / 2); sh.lineTo(w / 2, -h / 2); sh.lineTo(w / 2, h / 2); sh.lineTo(-w / 2, h / 2); }
+  const g = new THREE.ShapeGeometry(sh, 24), p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getX(i) + w / 2) / w, (p.getY(i) + h / 2) / h);
+  dribFrame.geometry.dispose(); dribFrame.geometry = g;
+  const spread = 0.07;
+  dribShadow.geometry.dispose(); dribShadow.geometry = new THREE.PlaneGeometry(w + 4 * spread, h + 4 * spread);
+  dribShadow.material.map?.dispose(); dribShadow.material.map = shadowTex(w, h, spread, Math.max(r, 0.001)); dribShadow.material.needsUpdate = true;
 }
 function draw() {
   renderer.autoClear = false; renderer.clear();
@@ -189,12 +270,12 @@ const DEVICES = {
   'macbook-classic': { name: 'MacBook Pro 14" (classic)', file: 'macbook.glb', aspect: 1.535, screenNode: 'Screen', lid: 108, el: 22,
     hinge: { node: 'Lid', axis: 'x', sign: -1, rest: 110 }, body: (m) => m.color.getHexString() === '565457' && m.metalness > 0.9, finish: true },
 };
-const draco = new DRACOLoader().setDecoderPath('/vendor/three/examples/jsm/libs/draco/gltf/');
+const draco = new DRACOLoader().setDecoderPath('vendor/three/examples/jsm/libs/draco/gltf/');
 const gltfLoader = new GLTFLoader().setDRACOLoader(draco);
 const deviceCache = {};
 
 async function buildDevice(id) {
-  const cfg = DEVICES[id], g = await gltfLoader.loadAsync('/models/' + cfg.file), model = g.scene;
+  const cfg = DEVICES[id], g = await gltfLoader.loadAsync('models/' + cfg.file), model = g.scene;
   const pose = new THREE.Group(); pose.add(model); const rig = new THREE.Group(); rig.add(pose);
   if (cfg.rot) model.rotation.set(rad(cfg.rot[0]), rad(cfg.rot[1]), rad(cfg.rot[2]));
   const rt = { id, cfg, rig, pose, model, bodyMats: [], hingeNode: null, hingeRest: 0, ground: null };
@@ -217,7 +298,7 @@ async function buildDevice(id) {
     ms.forEach((m, k) => {
       const isScreen = cfg.screenNode ? o.name === cfg.screenNode : cfg.screen?.test(m.name);
       const isCover = cfg.cover?.match.test(m.name);
-      if (isScreen) { if (Array.isArray(o.material)) o.material[k] = screenMat; else o.material = screenMat; o.castShadow = false; }
+      if (isScreen) { if (Array.isArray(o.material)) o.material[k] = screenMat; else o.material = screenMat; o.castShadow = false; rt.screenMesh = o; }
       else if (isCover) { if (Array.isArray(o.material)) o.material[k] = coverMat; else o.material = coverMat; o.castShadow = false; }
       else if (cfg.body?.(m) && !seen.has(m)) { seen.add(m); rt.bodyMats.push(m); }
     });
@@ -265,7 +346,7 @@ async function loadDevice(id) {
 
 {
   const loader = new GLTFLoader();
-  const env = await loader.loadAsync('/models/scene.glb');
+  const env = await loader.loadAsync('models/scene.glb');
   scene.add(env.scene);                                      // table + wall from the Blender scene
   env.scene.traverse((o) => { N[o.name] = o; });
   N.Laptop.removeFromParent();                               // old built-in laptop, replaced by the real device models
@@ -635,20 +716,73 @@ const texLoader = new THREE.TextureLoader(), texCache = {};
 function tex(name, srgb, repeat) {
   const key = name + repeat;
   if (!texCache[key]) {
-    const t = texLoader.load('/textures/' + name);
+    const t = texLoader.load('textures/' + name);
     t.flipY = false; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); t.anisotropy = 8; texCache[key] = t;
   }
   return texCache[key];
 }
 const curSurf = () => SURF.find((s) => s.id === S.surface) || SURF[0];
-const curInt = () => INT.find((s) => s.id === S.interior) || INT[0];
+/* your own wall image (uploaded): kept in this browser so it survives a reload */
+/* ready-made room photos for the wall: cropped at the skirting board, so the room's furniture stands just behind the table */
+const WALL_PRESETS = [
+  { id: 'room-sage', name: 'Sage room', file: 'walls/room-sage.jpg', thumb: 'walls/t_room-sage.jpg', scale: 0.6, x: 0 },
+  { id: 'room-blue', name: 'Blue room', file: 'walls/room-blue.jpg', thumb: 'walls/t_room-blue.jpg', scale: 0.55, x: 0 },
+  { id: 'room-white', name: 'Sunlit room', file: 'walls/room-white.jpg', thumb: 'walls/t_room-white.jpg', scale: 0.52, x: 0 },
+];
+/** bottom of the picture on the table line, for the given size */
+const wallBottomY = (im, k) => 2.4 * k / (im.width / im.height) / 2;
+function loadWallPreset(id, apply = true) {
+  const pr = WALL_PRESETS.find((w) => w.id === id); if (!pr) return;
+  const im = new Image();
+  im.onload = () => {
+    setWallImage(im);
+    if (apply) Object.assign(S, { wallPreset: id, interior: 'custom', bgMode: 'original', tableShow: true, wallImgMode: 'fill', wallImgScale: pr.scale, wallImgX: pr.x, wallImgY: wallBottomY(im, pr.scale) });
+    lookKey = ''; buildBackground(); refreshControls(); save();
+  };
+  im.src = 'textures/' + pr.file;
+}
+const WALL_IMG_KEY = 'mockup-wall-image-v1', CUSTOM_INT = { id: 'custom', name: 'Your image', color: '#ffffff', custom: true };
+let wallImg = null, wallTex = null, wallImgVer = 0;
+function setWallImage(im) {
+  wallImg = im; wallImgVer++;
+  wallTex?.dispose(); wallTex = null;
+  if (im) { wallTex = new THREE.Texture(im); wallTex.colorSpace = THREE.SRGBColorSpace; wallTex.flipY = false; wallTex.anisotropy = 8; wallTex.needsUpdate = true; }
+}
+/** fit the uploaded image on the wall: "fill" covers the whole visible wall once, "tile" repeats it at the chosen size */
+function fitWallTex() {
+  if (!wallTex || !wallImg) return;
+  // the wall plane is 10 m wide and 3 m tall (u: left→right, v: top→bottom), starting 0.1 m below the table top
+  const geo = N.Wall.geometry; if (!geo.boundingBox) geo.computeBoundingBox();
+  const g = geo.boundingBox, ww = Math.max(g.max.x - g.min.x, g.max.z - g.min.z), wh = g.max.y - g.min.y, y0 = g.min.y;
+  const imAR = wallImg.width / wallImg.height, k = S.wallImgScale || 1;
+  if (S.wallImgMode === 'tile') {
+    wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+    const tileH = 0.5 * k, tileW = tileH * imAR;                                   // tile height in metres
+    wallTex.repeat.set(ww / tileW, wh / tileH); wallTex.offset.set(0, 0);
+  } else {
+    // one picture centred behind the device, big enough to fill what the camera sees; "size" scales it, "height" moves it
+    const visW = 2.4 * k, visH = visW / imAR, yc = S.wallImgY ?? 0.45;
+    const uw = visW / ww, u0 = 0.5 + (S.wallImgX || 0) / ww - uw / 2, vh = visH / wh, vTop = 1 - (yc + visH / 2 - y0) / wh;
+    wallTex.repeat.set(1 / uw, 1 / vh); wallTex.offset.set(-u0 / uw, -vTop / vh);
+    // past its edges: room photos continue their plain wall and skirting board; your own image continues mirrored
+    wallTex.wrapS = wallTex.wrapT = S.wallPreset ? THREE.ClampToEdgeWrapping : THREE.MirroredRepeatWrapping;
+  }
+  wallTex.needsUpdate = true;
+}
+try {
+  const d = localStorage.getItem(WALL_IMG_KEY);
+  if (S.wallPreset && WALL_PRESETS.some((w) => w.id === S.wallPreset)) setTimeout(() => loadWallPreset(S.wallPreset, false));
+  else if (d) { const im = new Image(); im.onload = () => { setWallImage(im); lookKey = ''; applyScene?.(); }; im.src = d; }
+  else if (S.interior === 'custom') S.interior = 'none';
+} catch {}
+const curInt = () => S.interior === 'custom' ? CUSTOM_INT : INT.find((s) => s.id === S.interior) || INT[0];
 /* "Bottom block": the concrete plinth from the supplied file (its top carries a baked soft shadow) */
 let blockObj = null, blockLoading = false;
 async function ensureBlock() {
   if (blockObj || blockLoading) return; blockLoading = true;
   try {
-    const g = await gltfLoader.loadAsync('/models/devices/bottom.glb'); g.scene.updateMatrixWorld(true);
+    const g = await gltfLoader.loadAsync('models/devices/bottom.glb'); g.scene.updateMatrixWorld(true);
     let mesh = null; g.scene.traverse((o) => { if (o.isMesh && o.name === 'Box001') mesh = o; });
     const geo = mesh.geometry.clone(); geo.applyMatrix4(mesh.matrixWorld);
     geo.computeBoundingBox(); const bb = geo.boundingBox;
@@ -677,7 +811,7 @@ function placeStudio() {                                       // slide / rotate
 async function ensureStudio() {
   if (studioObj || studioLoading) return; studioLoading = true;
   try {
-    const g = await gltfLoader.loadAsync('/models/devices/table-scene.glb'); g.scene.updateMatrixWorld(true);
+    const g = await gltfLoader.loadAsync('models/devices/table-scene.glb'); g.scene.updateMatrixWorld(true);
     let mesh = null; g.scene.traverse((o) => { if (o.isMesh && o.name === 'CONVESSO-002') mesh = o; });
     const geo = mesh.geometry.clone(); geo.applyMatrix4(mesh.matrixWorld);
     geo.computeBoundingBox(); const c = geo.boundingBox.getCenter(new THREE.Vector3()); geo.translate(-c.x, 0, -c.z);
@@ -694,14 +828,15 @@ async function ensureStudio() {
 function applyLook() {
   if (S.block && !blockObj) ensureBlock();
   if (S.surface === 'studio' && !studioObj) ensureStudio();
-  const key = S.surface + '|' + S.interior; if (key === lookKey) return; lookKey = key;
+  const key = S.surface + '|' + S.interior + (S.interior === 'custom' ? '|' + wallImgVer + S.wallImgMode + S.wallImgScale + '|' + S.wallImgY + '|' + S.wallImgX + '|' + S.wallPreset : ''); if (key === lookKey) return; lookKey = key;
   const tm = N.Table.material, sp = curSurf(), rp = sp.repeat || [1, 1];
   if (sp.map) {
     tm.map = tex(sp.map, true, rp); tm.normalMap = sp.normal ? tex(sp.normal, false, rp) : null; tm.roughness = sp.rough; tm.clearcoat = 0;
   } else { tm.map = orig.tMap; tm.normalMap = orig.tNormal; tm.roughness = orig.tRough; tm.clearcoat = orig.tCoat; }
   tm.needsUpdate = true;
   const wm = N.Wall.material, ip = curInt();
-  wm.map = ip.map ? tex(ip.map, true, [5, 3]) : null;
+  if (ip.custom) { fitWallTex(); wm.map = wallTex; }
+  else wm.map = ip.map ? tex(ip.map, true, [5, 3]) : null;
   wm.needsUpdate = true;
 }
 
@@ -770,16 +905,20 @@ function applyScene() {
   N.Wall.position.y = N.Wall.userData.y0 - drop;                          // wall always starts at the table level
   N.Table.position.y = -drop; if (N.Ground) N.Ground.position.y = (dev.groundBase ?? 0) - drop;
   N.Wall.position.z = useStudio ? S.studioZ - studioObj.userData.half + 0.01 : N.Wall.userData.z;   // wall meets the table's back edge
+  if (N.Table.visible) {                                                    // flat table: stand the wall right on its back edge (no dark gap behind it)
+    const tg = N.Table.geometry, wg = N.Wall.geometry; if (!tg.boundingBox) tg.computeBoundingBox(); if (!wg.boundingBox) wg.computeBoundingBox();
+    N.Wall.position.z = N.Table.position.z + tg.boundingBox.min.z * N.Table.scale.z - wg.boundingBox.min.z + 0.002;
+  }
   N.Table.visible = S.tableShow && !useGround && !useStudio && !blockOn;
   if (studioObj) { studioObj.visible = S.tableShow && useStudio && !blockOn; placeStudio(); studioObj.userData.sh.material.opacity = Math.min(1, S.shadow * 0.9); }
   if (N.Ground) { N.Ground.visible = S.tableShow && useGround && !blockOn; N.Ground.userData.sh.material.opacity = Math.min(1, S.shadow * 0.9); }
   contactLayers.forEach((m) => { m.visible = !(useGround && S.tableShow) && !blockOn; });
   catcher.visible = !S.tableShow || blockOn; catcher.position.y = 0.0004 - drop;   // with the block on, only a soft shadow remains on the backdrop
-  scene.background = original ? new THREE.Color(ip.id === 'none' || ip.map ? 0x141416 : (S.wallColor || ip.color || '#ecdfc8')) : S.bgMode === 'transparent' ? null : bgTex;
+  scene.background = original ? new THREE.Color(ip.id === 'none' || ip.map || ip.custom ? 0x141416 : (S.wallColor || ip.color || '#ecdfc8')) : S.bgMode === 'transparent' ? null : bgTex;
 
   dribMat.color.setScalar(S.brightness);
   dbScene.background = S.bgMode === 'transparent' ? null : S.bgMode === 'original' ? new THREE.Color(0xffffff) : bgTex;
-  if (!dribShadow.material.map) dribShadow.userData.make();
+  buildDribFrame();
   dribShadow.material.opacity = S.dribShadow; dribShadow.visible = S.dribShadow > 0;
   renderer.toneMappingExposure = S.exposure;
   scene.environmentIntensity = S.env;
@@ -1011,6 +1150,8 @@ $('btnSaveProject').onclick = () => {
   colorField(l, 'Colour', A('keyColor'));
   slider(l, 'Soft fill', { ...A('fill_'), min: 0, max: 2, step: 0.02 });
   slider(l, 'Reflections', { ...A('env'), min: 0, max: 2.5, step: 0.05 });
+  slider(l, 'Screen reflection', { ...A('glow'), min: 0, max: 3, step: 0.05, fmt: (v) => (v ? v.toFixed(2) : 'Off') });
+  note(l, 'Light from the screen on the keyboard and the table. Its colour follows the video as it plays.');
   slider(l, 'Contact shadow', { ...A('contact'), min: 0, max: 1.5, step: 0.02 });
   slider(l, 'Shadow', { ...A('shadow'), min: 0, max: 1, step: 0.01 });
 
@@ -1059,7 +1200,9 @@ $('btnSaveProject').onclick = () => {
   checkField(m, 'Loop', { get: () => S.loop, set: (v) => { S.loop = v; } });
 
   const db = section(c, 'Dribbble shot', true, 'dribbble');
-  note(db, '1600×1200 canvas with a flat 1440×1040 frame (40 px top corners) aligned to the bottom. Your video or website recording fills the frame.');
+  note(db, '1600×1200 canvas with a flat 1440×1040 frame in the centre. Your video or website recording fills the frame.');
+  slider(db, 'Corner radius', { ...A('dribRadius'), min: 0, max: DB.rMax, step: 1, fmt: (v) => Math.round(v) + ' px' });
+  seg(db, [[0, '0'], [16, '16'], [24, '24'], [40, '40'], [64, '64']], { get: () => S.dribRadius, set: (v) => { S.dribRadius = v; applyScene(); } });
   slider(db, 'Frame shadow', { ...A('dribShadow'), min: 0, max: 0.5, step: 0.01 });
   lbl(db, 'FPS');
   seg(db, [[15, '15'], [25, '25'], [30, '30'], [60, '60']], { get: () => S.fps, set: (v) => { S.fps = v; } });
@@ -1090,7 +1233,7 @@ $('btnSaveProject').onclick = () => {
     const g = el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px' }); bg.append(g);
     const bs = items.map((it) => {
       const b = el('button', { title: it.name, onclick: () => { set(it.id); S.bgMode = 'original'; S.tableShow = true; if (items === SURF) { S.block = false; } buildBackground(); refreshControls(); save(); },
-        style: `position:relative;height:50px;border:2px solid transparent;border-radius:9px;cursor:pointer;background:${it.thumb ? `center/cover url(/textures/${it.thumb})` : (it.css || it.color || (it.id === 'default' ? '#2b2b2d' : '#ecdcc0'))}` },
+        style: `position:relative;height:50px;border:2px solid transparent;border-radius:9px;cursor:pointer;background:${it.thumb ? `center/cover url(textures/${it.thumb})` : (it.css || it.color || (it.id === 'default' ? '#2b2b2d' : '#ecdcc0'))}` },
         [el('span', { textContent: it.name, style: 'position:absolute;left:0;right:0;bottom:0;font-size:10px;padding:2px 3px;background:#000a;color:#fff;border-radius:0 0 6px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' })]);
       g.append(b); return [it.id, b];
     });
@@ -1112,7 +1255,7 @@ $('btnSaveProject').onclick = () => {
   const sbs = SCENES.map((sc) => {
     const b = el('button', { title: sc.name,
       onclick: () => { Object.assign(S, { blockSurface: false }, sc.set, { bgMode: 'original', tableShow: true }); buildBackground(); refreshControls(); save(); },
-      style: `position:relative;height:50px;border:2px solid transparent;border-radius:9px;cursor:pointer;background:${sc.thumb ? `center/cover url(/textures/${sc.thumb})` : sc.css}` },
+      style: `position:relative;height:50px;border:2px solid transparent;border-radius:9px;cursor:pointer;background:${sc.thumb ? `center/cover url(textures/${sc.thumb})` : sc.css}` },
       [el('span', { textContent: sc.name, style: 'position:absolute;left:0;right:0;bottom:0;font-size:10px;padding:2px 3px;background:#000a;color:#fff;border-radius:0 0 6px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' })]);
     sg.append(b); return [sc, b];
   });
@@ -1122,6 +1265,28 @@ $('btnSaveProject').onclick = () => {
   grid(SURF, () => S.surface, (v) => { S.surface = v; });
   lbl(bg, 'Interior (wall)');
   grid(INT, () => S.interior, (v) => { S.interior = v; });
+  lbl(bg, 'Room photos (wall)');
+  const rg = el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px' }); bg.append(rg);
+  const rbs = WALL_PRESETS.map((w) => {
+    const b = el('button', { title: w.name, onclick: () => loadWallPreset(w.id),
+      style: `position:relative;height:50px;border:2px solid transparent;border-radius:9px;cursor:pointer;background:center/cover url(textures/${w.thumb})` },
+      [el('span', { textContent: w.name, style: 'position:absolute;left:0;right:0;bottom:0;font-size:10px;padding:2px 3px;background:#000a;color:#fff;border-radius:0 0 6px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' })]);
+    rg.append(b); return [w.id, b];
+  });
+  refreshers.push(() => rbs.forEach(([id, b]) => { b.style.borderColor = S.interior === 'custom' && S.wallPreset === id ? '#fff' : 'transparent'; }));
+  const wrow = el('div', { className: 'row2' }); bg.append(wrow);
+  btn(wrow, 'Upload wall image…', () => $('fileWall').click(), 'primary');
+  const wallRm = btn(wrow, 'Remove', () => {
+    setWallImage(null); S.wallPreset = null; try { localStorage.removeItem(WALL_IMG_KEY); } catch {}
+    if (S.interior === 'custom') S.interior = 'none'; lookKey = ''; applyScene(); refreshControls(); save();
+  });
+  const w0 = bg.children.length;
+  seg(bg, [['fill', 'Fill wall'], ['tile', 'Tile']], { get: () => S.wallImgMode, set: (v) => { S.wallImgMode = v; applyScene(); } });
+  slider(bg, 'Wall image size', { get: () => S.wallImgScale, set: (v) => { S.wallImgScale = v; applyScene(); }, min: 0.3, max: 3, step: 0.05, fmt: (v) => v.toFixed(2) + '×' });
+  slider(bg, 'Wall image left / right', { get: () => S.wallImgX, set: (v) => { S.wallImgX = v; applyScene(); }, min: -2, max: 2, step: 0.01, fmt: (v) => Math.round(v * 100) + ' cm' });
+  slider(bg, 'Wall image height', { get: () => S.wallImgY, set: (v) => { S.wallImgY = v; applyScene(); }, min: -0.2, max: 1.4, step: 0.01, fmt: (v) => Math.round(v * 100) + ' cm' });
+  const wallEls = [...bg.children].slice(w0);
+  refreshers.push(() => { const on = !!wallImg && S.interior === 'custom'; wallEls.forEach((e) => { e.style.display = on ? '' : 'none'; }); wallRm.style.display = wallImg ? '' : 'none'; });
   lbl(bg, 'Gradient presets');
   const PRE = [['Sunset', '#ff9a5a', '#c1275e'], ['Ocean', '#0f2027', '#2c9fd9'], ['Violet', '#5b6cff', '#ff7ab6'], ['Mint', '#d4fc79', '#96e6a1'], ['Midnight', '#0b0b12', '#2a2f55'], ['Cream', '#f6eddc', '#d9c3a0'], ['Mono', '#ffffff', '#9a9a9a']];
   const pw = el('div', { style: 'display:grid;grid-template-columns:repeat(7,1fr);gap:6px' }); bg.append(pw);
@@ -1289,12 +1454,29 @@ $('fileBg').onchange = (e) => {
   const im = new Image(); im.onload = () => { bgImage = im; S.bgMode = 'image'; S.tableShow = false; buildBackground(); refreshControls(); }; im.src = URL.createObjectURL(f); e.target.value = '';
 };
 
+$('fileWall').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return; e.target.value = '';
+  const im = new Image();
+  im.onload = () => {
+    // keep a resized copy (max 2048 px) so it loads fast and fits in the browser's storage
+    const k = Math.min(1, 2048 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+    c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    setWallImage(c);
+    try { localStorage.setItem(WALL_IMG_KEY, c.toDataURL('image/jpeg', 0.88)); } catch { setStatus('Wall image applied (too large to remember after a reload).'); }
+    Object.assign(S, { interior: 'custom', bgMode: 'original', tableShow: true, wallPreset: null, wallImgX: 0 });
+    lookKey = ''; buildBackground(); refreshControls(); save(); setStatus('Wall image applied');
+  };
+  im.onerror = () => setStatus('Could not read that image', true);
+  im.src = URL.createObjectURL(f);
+};
+
 /* ------------------------------------------------------------------ loop */
 let frameN = 0;
 function frame(ts) {
   const dt = Math.min(0.1, (ts - lastTs) / 1000); lastTs = ts;
   tickSource(dt);
   drawScreen(); screenTex.needsUpdate = true; if (dribTex) dribTex.needsUpdate = true; if (coverTex) coverTex.needsUpdate = true;
+  sampleScreen(); updateGlow();
   const t = timeNow(), len = sourceLen();
   const motionOn = S.motion !== 'none' && S.motionPreview;
   orbit.enabled = !motionOn;
@@ -1430,6 +1612,7 @@ async function exportOne(layout, tag) {
       if (src.kind === 'video') await seekTo(video, src.start + st);
       else { clock = st; if (src.kind === 'frames') await loadFrame(frameIdx(st)).p; }
       drawScreen(); screenTex.needsUpdate = true; if (dribTex) dribTex.needsUpdate = true; if (coverTex) coverTex.needsUpdate = true;
+      sampleScreen(i === 0); updateGlow();
       applyCamera(S.motion !== 'none' ? Math.min(1, t / len) : 0);
       draw();
       const vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
