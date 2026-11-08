@@ -29,7 +29,8 @@ jobs:
 
       - name: Install desktop dependencies
         working-directory: desktop
-        run: npm ci
+        # the Electron download sometimes times out (504): try up to 3 times
+        run: for i in 1 2 3; do npm ci && exit 0; echo "npm ci failed (try $i), retrying in 20 s"; sleep 20; done; exit 1
 
       - name: Build the .dmg
         working-directory: desktop
