@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { planFromText } from './plan-text.js';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 const rad = THREE.MathUtils.degToRad;
@@ -631,8 +632,8 @@ function checkFit() {
 }
 async function captureSite(url, mode, dur, btn, speed = 700) {
   if (!url) return setStatus('Paste a website link first.', true);
-  const plan = mode === 'scroll' && S.capPlanOn ? (S.capPlan || '').trim() : '';
-  if (mode === 'scroll' && S.capPlanOn && !plan) return setStatus('Write your click plan first (one step per line), or switch to Auto scroll.', true);
+  const plan = mode === 'scroll' && S.capPlanOn ? planFromText(S.capPlan).steps.join('\n') : '';   // the paragraph → plain steps for the recorder
+  if (mode === 'scroll' && S.capPlanOn && !plan) return setStatus('Describe what to click first (e.g. “click Pricing, then scroll to the bottom”), or switch to Auto scroll.', true);
   if (/^:?\d{2,5}$/.test(url)) url = 'http://localhost:' + url.replace(':', '');
   if (!/^https?:\/\//i.test(url)) url = (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+|[\w-]+\.local)(:|\/|$)/i.test(url) ? 'http://' : 'https://') + url;
   btn.disabled = true; setStatus(mode === 'scroll' ? `Recording ${url} … ${dur ? `(≈${dur + 6}s)` : '(auto-detecting scroll length)'}` : `Taking screenshot of ${url} …`);
@@ -1270,17 +1271,25 @@ addEventListener('keydown', (e) => {                                 // ⌘O / �
   note(m, 'Scrolls the page like a person: it pauses now and then to point at menus, buttons, cards and accordions. Never clicks links. To choose what to click, use My click plan.');
   const autoEls = [...m.children].slice(a0);
   // click plan: the person lists what to click and which pages to open; the recorder follows it with natural mouse movement
-  const planBox = el('textarea', { className: 'plan', spellcheck: false, rows: 8,
-    placeholder: 'One step per line, for example:\nscroll to Pricing\nclick Yearly\nhover Pro plan\nclick Get started\ngo /about\nscroll page\nback',
-    value: S.capPlan || '', oninput: () => { S.capPlan = planBox.value; save(); } });
+  // write it like you'd tell a person; the steps it understood show live underneath
+  const planBox = el('textarea', { className: 'plan', spellcheck: true, rows: 6,
+    placeholder: 'Describe what to do, like you\'d tell a person. For example:\n\nScroll to the pricing section, click Yearly, then hover over the Pro plan and click Get started. After that open the About page, scroll to the bottom and go back.',
+    value: S.capPlan || '', oninput: () => { S.capPlan = planBox.value; save(); showSteps(); } });
   m.append(planBox);
-  const planHelp = el('div', { className: 'note plan-help', innerHTML:
-    '<b>click</b> Pricing — a button, link or tab by its text · <b>click</b> Get started (2) — the 2nd one · <b>click</b> #id or .class<br>' +
-    '<b>hover</b> Features · <b>go</b> /about or a full link · <b>back</b><br>' +
-    '<b>scroll</b> · <b>scroll up</b> · <b>scroll</b> 600 · <b>scroll to</b> Testimonials · <b>scroll page</b> · <b>scroll top</b> · <b>wait</b> 2<br>' +
-    'The cursor glides to each target, hovers, then clicks. Steps that would pay, submit, delete or sign out are skipped. On the live site a plan can run ~40 s; the Mac app has no limit.' });
-  m.append(planHelp);
-  refreshers.push(() => { const on = !!S.capPlanOn; autoEls.forEach((e) => { e.style.display = on ? 'none' : ''; }); planBox.style.display = planHelp.style.display = on ? '' : 'none'; if (document.activeElement !== planBox && planBox.value !== (S.capPlan || '')) planBox.value = S.capPlan || ''; });
+  const stepsBox = el('div', { className: 'plan-steps' }); m.append(stepsBox);
+  const showSteps = () => {
+    const { steps, unknown } = planFromText(S.capPlan || ''); stepsBox.innerHTML = '';
+    if (!steps.length && !unknown.length) { stepsBox.append(el('p', { className: 'note', textContent: 'The steps I understand will appear here as you type.' })); return; }
+    if (steps.length) { stepsBox.append(el('div', { className: 'ps-h', textContent: `I'll do ${steps.length} step${steps.length > 1 ? 's' : ''}:` })); const ol = el('ol'); steps.forEach((x) => ol.append(el('li', { textContent: x }))); stepsBox.append(ol); }
+    unknown.forEach((u) => stepsBox.append(el('p', { className: 'ps-q', textContent: `Not sure what to do with: “${u}”. Try a word like click, hover, open, scroll, wait or go back.` })));
+  };
+  const planHelp = sub(m, 'Tips for writing it');
+  note(planHelp, 'Name things by the text you see on the page: “click Book a demo”, “hover over Pricing”. Put names in quotes if they are long: click “Start your free trial”.');
+  note(planHelp, 'You can say: click / tap / select, open the About page, go to /contact or a full link, hover over…, scroll down / up / to the Pricing section / to the bottom / to the top, wait 2 seconds, go back. “the second Learn more” picks the 2nd one.');
+  note(planHelp, 'The cursor glides to each target, hovers, then clicks. Anything that would pay, submit, delete or sign out is skipped. On the live site a recording can run about 40 s; the Mac app has no limit.');
+  const planHelpEl = planHelp.parentElement;
+  refreshers.push(() => { const on = !!S.capPlanOn; autoEls.forEach((e) => { e.style.display = on ? 'none' : ''; }); planBox.style.display = stepsBox.style.display = planHelpEl.style.display = on ? '' : 'none'; if (document.activeElement !== planBox && planBox.value !== (S.capPlan || '')) { planBox.value = S.capPlan || ''; showSteps(); } });
+  showSteps();
   const row = el('div', { className: 'row2' }); m.append(row);
   btn(row, 'Record', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
   btn(row, 'Screenshot', (b) => captureSite(urlIn.value.trim(), 'screenshot', dur, b));
