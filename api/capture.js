@@ -38,7 +38,7 @@ async function assertPublicHost(host) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { url, mode = 'scroll', duration = 0, speed = 350, width = 1440, height = 900, plan = '' } = req.body || {};
+  const { url, mode = 'scroll', duration = 0, speed = 350, width = 1440, height = 900 } = req.body || {};
   let target;
   try {
     target = new URL(url);
@@ -77,14 +77,6 @@ export default async function handler(req, res) {
     if (mode === 'screenshot') {
       const out = await recordPage({ browser, url: target.href, mode, width: vw, height: vh, gotoMs: 15000, skipIdle: true, prepare, onInfo });
       send({ image: Buffer.from(out.image).toString('base64') });
-    } else if (String(plan || '').trim()) {
-      // a click plan needs a live recording (clicks, other pages): stream the screencast frames, kept short for the hosted time limit
-      const out = await recordPage({
-        browser, url: target.href, mode: 'scroll', speed: +speed || 700, width: vw, height: vh, plan: String(plan).slice(0, 8000), maxPlanSec: 42,
-        gotoMs: 15000, quality: 55, minFrameGap: 1 / 15, skipIdle: true, prepare, onInfo,
-        onFrame: ({ ts, data }) => send({ f: data, t: ts }),
-      });
-      send({ done: true, length: out.length, plan: out.plan, took: ts() });
     } else {
       // The hosted machine is small, so a live screen recording would be choppy. Capture the whole page as tall image
       // tiles instead; the app scrolls through them smoothly (fast, smooth, any page length).

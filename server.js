@@ -163,7 +163,7 @@ app.post('/api/project/open', async (req, res) => {
 });
 
 app.post('/api/capture', async (req, res) => {
-  const { url, mode = 'scroll', duration = 0, speed = 700, width = 1440, height = 900, interact = 0, plan = '', stream = false } = req.body || {};
+  const { url, mode = 'scroll', duration = 0, speed = 700, width = 1440, height = 900, interact = 0, stream = false } = req.body || {};
   let target;
   try {
     target = new URL(url);
@@ -188,7 +188,7 @@ app.post('/api/capture', async (req, res) => {
     const frames = [];
     let t0 = null;
     const out = await recordPage({
-      browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 700, width, height, interact: Number(interact) || 0, plan: String(plan || '').slice(0, 8000),
+      browser, url: target.href, mode, duration: Number(duration) || 0, speed: Number(speed) || 700, width, height, interact: Number(interact) || 0,
       maxScrollSec: 150, warmupMs: 20000, gotoMs: 45000, quality: 80, minFrameGap: 1 / 60, onProgress, isCancelled: () => cancelled,
       onFrame: ({ ts, data }) => {
         if (t0 === null) { t0 = ts; fs.mkdirSync(dir, { recursive: true }); }
@@ -203,7 +203,7 @@ app.post('/api/capture', async (req, res) => {
       return finish(200, { done: true, kind: 'image', url: `/captures/${file}` });
     }
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ length: out.length, frames }));
-    finish(200, { done: true, kind: 'frames', url: `/captures/${id}/manifest.json`, length: out.length, count: frames.length, pageHeight: out.pageHeight, ended: out.ended, plan: out.plan });
+    finish(200, { done: true, kind: 'frames', url: `/captures/${id}/manifest.json`, length: out.length, count: frames.length, pageHeight: out.pageHeight, ended: out.ended });
   } catch (e) {
     if (!cancelled) log(`capture of ${url} failed: ${e.message}`);
     finish(500, { error: String(e.message || e).split('\n')[0] });
