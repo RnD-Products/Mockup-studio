@@ -189,3 +189,5 @@ button.dashed:hover { color: var(--text); border-color: #555; }
 .topmenu .tm { display: flex; gap: 4px; flex: none; }
 .topmenu .tm button { background: var(--bar); border: 0; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 600; color: var(--text); }
 .topmenu .tm button:hover { background: var(--bar2); }
+
+.btn.arm, button.arm { background: #c0392b !important; color: #fff !important; border-color: #c0392b !important; }

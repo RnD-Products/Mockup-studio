@@ -1430,7 +1430,13 @@ addEventListener('keydown', (e) => {                                 // âŒ˜O / â
   colorField(dv, 'Custom colour', { get: () => S.bodyColor, set: (v) => { S.bodyColor = v; S.finish = 'Space Black'; applyScene(); }, fallback: () => '#' + orig.body.getHexString(), resettable: true });
   const finishEls = [...dv.children].slice(f0); refreshers.push(() => { finishEls.forEach((e) => { e.style.display = dev.bodyMats.length ? '' : 'none'; }); });
   slider(dv, 'Exposure', { ...A('exposure'), min: 0.3, max: 2.2, step: 0.02 });
-  btn(dv, 'Reset all controls', () => { if (!confirm('Reset every control to the original look?')) return; S = defaults(); save(); setLayout('h'); buildBackground(); refreshControls(); });
+  // two clicks instead of a browser pop-up (pop-ups are blocked in some windows, so the reset silently did nothing)
+  let armT = 0;
+  btn(dv, 'Reset all controls', (b) => {
+    if (!armT) { b.textContent = 'Click again to reset everything'; b.classList.add('arm'); armT = setTimeout(() => { armT = 0; b.textContent = 'Reset all controls'; b.classList.remove('arm'); }, 3500); return; }
+    clearTimeout(armT); armT = 0; b.textContent = 'Reset all controls'; b.classList.remove('arm');
+    S = defaults(); lookKey = ''; dribKey = ''; save(); setLayout('h'); buildBackground(); applyScene(); refreshControls(); setStatus('All controls reset');
+  });
 }
 
 /* --- logo upload */
