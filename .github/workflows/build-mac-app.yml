@@ -29,13 +29,21 @@ jobs:
 
       - name: Install desktop dependencies
         working-directory: desktop
-        # the Electron download sometimes times out (504): try up to 3 times
-        run: for i in 1 2 3; do npm ci && exit 0; echo "npm ci failed (try $i), retrying in 20 s"; sleep 20; done; exit 1
+        # the Electron download from GitHub sometimes times out (504): retry, and from the 2nd try use the npmmirror copy
+        run: |
+          for i in 1 2 3; do
+            if [ $i -gt 1 ]; then export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/; fi
+            npm ci && exit 0; echo "npm ci failed (try $i), retrying in 20 s"; sleep 20
+          done; exit 1
 
       - name: Build the .dmg
         working-directory: desktop
-        # packaging downloads Electron / dmg tools from GitHub, which sometimes times out (504): try up to 3 times
-        run: for i in 1 2 3; do npm run dist && exit 0; echo "packaging failed (try $i), retrying in 30 s"; sleep 30; done; exit 1
+        # packaging downloads Electron / dmg tools from GitHub, which sometimes times out (504): retry, then use the npmmirror copies
+        run: |
+          for i in 1 2 3; do
+            if [ $i -gt 1 ]; then export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/; fi
+            npm run dist && exit 0; echo "packaging failed (try $i), retrying in 30 s"; sleep 30
+          done; exit 1
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no Apple Developer certificate: ad-hoc signed by scripts/adhoc-sign.cjs
 
