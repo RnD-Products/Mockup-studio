@@ -34,7 +34,8 @@ jobs:
 
       - name: Build the .dmg
         working-directory: desktop
-        run: npm run dist
+        # packaging downloads Electron / dmg tools from GitHub, which sometimes times out (504): try up to 3 times
+        run: for i in 1 2 3; do npm run dist && exit 0; echo "packaging failed (try $i), retrying in 30 s"; sleep 30; done; exit 1
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no Apple Developer certificate: ad-hoc signed by scripts/adhoc-sign.cjs
 
