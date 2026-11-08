@@ -49,7 +49,7 @@ const defaults = () => ({
   text: '', font: '700 Inter, Helvetica, Arial, sans-serif', textColor: '#ffffff', textSize: 0.09, textX: 0, textY: -0.8, bodyColor: null, exposure: 0.95, env: 1.1, key: 1.5, keyAz: -35, keyColor: '#fff4e6',
   fill_: 0.15, shadow: 0.55,
   // export
-  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0,
+  glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0, capPlanOn: false, capPlan: '',
   autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
@@ -415,6 +415,12 @@ async function loadFrames(url, label) {
   useFrames(m.frames.map((f) => ({ t: f.t, url: base + f.f })), m.length, label);
 }
 /** hosted site: the /api/capture serverless function streams newline-delimited JSON (frames, then {done}) */
+/** after a click-plan recording: say which steps worked and which were skipped (and why) */
+function planReport(log) {
+  const bad = log.filter((x) => !x.ok);
+  if (!bad.length) return setStatus(`Click plan done: all ${log.length} steps worked.`);
+  setStatus(`Click plan: ${log.length - bad.length} of ${log.length} steps worked. ` + bad.slice(0, 3).map((x) => (x.step ? `Step ${x.step} (${x.raw}): ` : '') + x.msg).join(' · '), true);
+}
 async function captureHosted(body, host, signal) {
   const r = await fetch('/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `The recording service answered ${r.status}. Try again, or run the app locally.`); }
@@ -429,7 +435,8 @@ async function captureHosted(body, host, signal) {
       if (m.info) {
         setStatus(`${m.info} (${host})`);
         const px = /Capturing the page \((\d+) px\)/.exec(m.info); if (px) needed = Math.max(1, Math.ceil(+px[1] / 3000));
-        recUI.set(/Starting/.test(m.info) ? 0.05 : /Page loaded/.test(m.info) ? 0.25 : /Measuring/.test(m.info) ? 0.35 : px ? 0.45 : 0.1, m.info.split(' · ')[0]);
+        const st = /^Step (\d+)\/(\d+)/.exec(m.info);   // click plan progress
+        recUI.set(st ? 0.2 + 0.75 * (+st[1] - 1) / +st[2] : /Starting/.test(m.info) ? 0.05 : /Page loaded/.test(m.info) ? 0.25 : /Measuring/.test(m.info) ? 0.35 : px ? 0.45 : 0.1, m.info.split(' · ')[0]);
         continue;
       }
       if (m.image) { await loadImageURL('data:image/jpeg;base64,' + m.image, host); return; }
@@ -446,7 +453,7 @@ async function captureHosted(body, host, signal) {
         frames.push({ t: m.t - t0, url: URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' })) });
         if (frames.length % 10 === 0) setStatus(`Recording ${host}… ${frames.length} frames received`);
       }
-      if (m.done) { length = m.length; meta = m; }
+      if (m.done) { length = m.length; meta = m; if (m.plan) setTimeout(() => planReport(m.plan), 300); }
     }
   }
   if (tiles.length && meta) { await Promise.all(tiles.map((t) => t.ready)); useScrollImage(tiles, meta, host, body.duration, body.speed); return; }
@@ -624,6 +631,8 @@ function checkFit() {
 }
 async function captureSite(url, mode, dur, btn, speed = 700) {
   if (!url) return setStatus('Paste a website link first.', true);
+  const plan = mode === 'scroll' && S.capPlanOn ? (S.capPlan || '').trim() : '';
+  if (mode === 'scroll' && S.capPlanOn && !plan) return setStatus('Write your click plan first (one step per line), or switch to Auto scroll.', true);
   if (/^:?\d{2,5}$/.test(url)) url = 'http://localhost:' + url.replace(':', '');
   if (!/^https?:\/\//i.test(url)) url = (/^(localhost|127\.|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+|[\w-]+\.local)(:|\/|$)/i.test(url) ? 'http://' : 'https://') + url;
   btn.disabled = true; setStatus(mode === 'scroll' ? `Recording ${url} … ${dur ? `(≈${dur + 6}s)` : '(auto-detecting scroll length)'}` : `Taking screenshot of ${url} …`);
@@ -639,13 +648,13 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
         base = HELPER;
         setStatus(`Recording ${url} through the local app…`);
       } else {                                                  // a public website: the hosted recorder does it
-        await captureHosted({ url, mode, duration: dur, speed, ...size }, host, recCtrl.signal);
+        await captureHosted({ url, mode, duration: dur, speed, plan, ...size }, host, recCtrl.signal);
         lastCap = { url, mode, dur, speed, size }; checkFit();
         recUI.hide(); recCtrl = null; btn.disabled = false; return;
       }
     }
     const r = await fetch(base + '/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: recCtrl.signal,
-      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, stream: true, ...size }) });
+      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, plan, stream: true, ...size }) });
     let j;
     if ((r.headers.get('content-type') || '').includes('ndjson')) j = await readStream(r, (m) => { if (m.p != null) recUI.set(m.p, m.t); });
     else { j = await r.json(); if (!r.ok) throw new Error(j.error || 'Capture failed'); }
@@ -654,6 +663,7 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
     else if (j.kind === 'image') await loadImageURL(base + j.url, new URL(url).host);
     else await loadVideoURL(base + j.url, { start: j.start, end: j.start + j.length, label: new URL(url).host });
     lastCap = { url, mode, dur, speed, size }; rememberShot(); checkFit();
+    if (j.plan) planReport(j.plan);
   } catch (e) { setStatus(e.name === 'AbortError' ? 'Recording cancelled.' : e.message, e.name !== 'AbortError'); }
   recUI.hide(); recCtrl = null;
   btn.disabled = false;
@@ -1195,8 +1205,24 @@ $('btnSaveProject').onclick = () => {
   const urlIn = el('input', { type: 'text', placeholder: 'https://your-website.com', spellcheck: false }); field(m, 'Link', urlIn, 'wide');
   let dur = 0, spd = 700;
   slider(m, 'Scroll length', { get: () => dur, set: (v) => { dur = v; }, min: 0, max: 40, fmt: (v) => (v ? v + 's' : 'Auto') });
+  lbl(m, 'While recording');
+  seg(m, [[false, 'Auto scroll'], [true, 'My click plan']], { get: () => !!S.capPlanOn, set: (v) => { S.capPlanOn = v; } });
+  const a0 = m.children.length;
   selectField(m, 'Pauses & hovers', { get: () => String(S.interact), set: (v) => { S.interact = +v; }, options: [['0', 'Off — plain scroll'], ['1', 'Light'], ['2', 'Natural'], ['3', 'Lively']] });
   note(m, 'While recording, it now and then pauses and points at things on the page (menu, buttons, cards, images, accordions), picked at random from the site’s structure. Never clicks links.');
+  const autoEls = [...m.children].slice(a0);
+  // click plan: the person lists what to click and which pages to open; the recorder follows it with natural mouse movement
+  const planBox = el('textarea', { className: 'plan', spellcheck: false, rows: 8,
+    placeholder: 'One step per line, for example:\nscroll to Pricing\nclick Yearly\nhover Pro plan\nclick Get started\ngo /about\nscroll page\nback',
+    value: S.capPlan || '', oninput: () => { S.capPlan = planBox.value; save(); } });
+  m.append(planBox);
+  const planHelp = el('div', { className: 'note plan-help', innerHTML:
+    '<b>click</b> Pricing — a button, link or tab by its text · <b>click</b> Get started (2) — the 2nd one · <b>click</b> #id or .class<br>' +
+    '<b>hover</b> Features · <b>go</b> /about or a full link · <b>back</b><br>' +
+    '<b>scroll</b> · <b>scroll up</b> · <b>scroll</b> 600 · <b>scroll to</b> Testimonials · <b>scroll page</b> · <b>scroll top</b> · <b>wait</b> 2<br>' +
+    'The cursor glides to each target, hovers, then clicks. Steps that would pay, submit, delete or sign out are skipped. On the live site a plan can run ~40 s; the Mac app has no limit.' });
+  m.append(planHelp);
+  refreshers.push(() => { const on = !!S.capPlanOn; autoEls.forEach((e) => { e.style.display = on ? 'none' : ''; }); planBox.style.display = planHelp.style.display = on ? '' : 'none'; if (document.activeElement !== planBox && planBox.value !== (S.capPlan || '')) planBox.value = S.capPlan || ''; });
   slider(m, 'Scroll speed (recording)', { get: () => spd, set: (v) => { spd = v; }, min: 200, max: 2500, step: 50, fmt: (v) => v + ' px/s' });
   seg(m, [[400, 'Slow'], [700, 'Normal'], [1100, 'Fast'], [1800, 'Very fast']], { get: () => spd, set: (v) => { spd = v; } });
   lbl(m, 'Recording size');
