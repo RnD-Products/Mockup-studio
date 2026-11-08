@@ -143,12 +143,9 @@ button.dashed:hover { color: var(--text); border-color: #555; }
 .fm-foot { display: flex; gap: 8px; align-items: center; }
 
 #colLeft { grid-column: 1; } #colTransform { grid-column: 2; } #stage { grid-column: 3; } #colRight { grid-column: 4; }
-#app.dribbble { grid-template-columns: 250px 0 minmax(0, 1fr) 270px; }
-#app.dribbble #colTransform { display: none; }
 #app.dribbble [data-mode=mockup], #app:not(.dribbble) [data-mode=dribbble] { display: none; }
 #topTabs { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 5; max-width: calc(100% - 16px); }
-#modeTabs { display: flex; gap: 2px; background: var(--bar); border-radius: 12px; padding: 3px; }
-#modeTabs button { background: none; border: 0; border-radius: 9px; padding: 7px 16px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+#modeTabs button { font-weight: 600; }
 #modeTabs button.on { background: #fff; color: #111; }
 
 #btnSpeed { width: auto; min-width: 52px; padding: 0 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -187,3 +184,33 @@ button.dashed:hover { color: var(--text); border-color: #555; }
 textarea.plan { width: 100%; box-sizing: border-box; min-height: 130px; resize: vertical; background: var(--bar); border: 1px solid transparent; border-radius: 10px; padding: 9px 11px; color: inherit; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
 textarea.plan:focus { border-color: #ffffff40; }
 .plan-help b { color: #e8e8e8; font-weight: 600; }
+
+/* ---- layout: output bar over the preview, left footer, sub-groups, guide ---- */
+#outBar { display: flex; align-items: center; gap: 8px; background: var(--bar); border-radius: 12px; padding: 3px; }
+#outBar .grp { display: flex; gap: 2px; }
+#outBar button { background: none; border: 0; border-radius: 9px; padding: 6px 11px; color: var(--muted); font-weight: 600; white-space: nowrap; font-size: 12px; }
+#outBar button.on { background: #fff; color: #111; }
+#outBar .sep { width: 1px; height: 18px; background: #ffffff1f; }
+#outBar .tag { color: var(--muted); font-size: 11px; padding: 0 6px 0 8px; white-space: nowrap; }
+#outBar .fixed { color: var(--text); font-weight: 600; font-size: 12px; padding: 6px 10px; }
+.leftfoot { gap: 6px; } .leftfoot button { flex: 1; }
+#btnProjects.on { color: var(--text); border-color: #777; }
+#finishBox:empty { display: none; }
+#finishBox { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 6px; }
+#finishBox .lbl { margin: 0; }
+.sub { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.sub > .sub-title { font-size: 12px; color: var(--muted); cursor: pointer; padding: 4px 0; user-select: none; display: flex; justify-content: space-between; }
+.sub > .sub-title::after { content: "▾"; transition: transform .15s; }
+.sub.closed > .sub-title::after { transform: rotate(-90deg); }
+.sub.closed > .sub-body { display: none; }
+.sub > .sub-body { display: grid; gap: 6px; padding-top: 4px; }
+.srcpart[hidden] { display: none !important; }
+#guide { position: absolute; left: 10px; bottom: 10px; z-index: 6; display: flex; align-items: center; gap: 10px; background: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 12px; padding: 8px 10px 8px 12px; font-size: 12px; box-shadow: 0 10px 30px #000a; max-width: calc(100% - 20px); }
+#guide[hidden] { display: none; }
+#guide ol { display: flex; gap: 14px; margin: 0; padding: 0; list-style: none; flex-wrap: wrap; }
+#guide li { color: var(--muted); white-space: nowrap; } #guide li b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #fff; color: #111; font-size: 11px; margin-right: 6px; }
+#guide li.done { text-decoration: line-through; opacity: .55; }
+#guide button { background: none; border: 0; color: var(--muted); font-size: 14px; padding: 2px 4px; }
+.leftfoot button { font-size: 12px; white-space: nowrap; padding: 9px 6px; }
+#outBar .fixed { white-space: nowrap; }
+.sub > .sub-title { padding: 6px 2px; color: #b5b5b5; font-weight: 500; }

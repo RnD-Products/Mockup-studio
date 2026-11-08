@@ -1071,7 +1071,12 @@ function section(parent, title, open = true, mode = 'both') {
   const d = el('div', { className: 'sec' + (open ? '' : ' closed') });
   const b = el('div', { className: 'sec-body' });
   d.append(el('div', { className: 'sec-title', textContent: title, onclick: () => d.classList.toggle('closed') }), b);
-  d.dataset.mode = mode; parent.append(d); return b;
+  d.dataset.mode = mode; d.dataset.key = title; parent.append(d); return b;
+}
+/** a smaller collapsible group inside a section (for the less-used settings) */
+function sub(parent, title, open = false) {
+  const d = el('div', { className: 'sub' + (open ? '' : ' closed') }), b = el('div', { className: 'sub-body' });
+  d.append(el('div', { className: 'sub-title', textContent: title, onclick: () => d.classList.toggle('closed') }), b); parent.append(d); return b;
 }
 const lbl = (p, t) => p.append(el('div', { className: 'lbl', textContent: t }));
 const note = (p, t) => p.append(el('p', { className: 'note', textContent: t }));
@@ -1145,31 +1150,20 @@ function renderProjects() {
     S = { ...defaults(), ...p.state }; save(); setLayout(S.layout); buildBackground(); refreshControls(); setStatus(`Loaded project “${p.name}”`);
   } })));
 }
-document.querySelectorAll('.tabs2 button').forEach((b) => b.onclick = () => {
-  document.querySelectorAll('.tabs2 button').forEach((x) => x.classList.toggle('on', x === b));
-  $('tabMockups').hidden = b.dataset.tab !== 'mockups'; $('tabProjects').hidden = b.dataset.tab !== 'projects'; renderProjects();
-});
+$('btnProjects').onclick = () => {                                 // swap the device list for the saved projects (and back)
+  const show = $('tabProjects').hidden; $('tabProjects').hidden = !show; $('tabMockups').hidden = show;
+  $('btnProjects').classList.toggle('on', show); $('btnProjects').textContent = show ? '← Mockups' : 'Projects'; renderProjects();
+};
 $('btnSaveProject').onclick = () => {
   const name = prompt('Project name', 'Project ' + (projects().length + 1)); if (!name) return;
   const list = projects(); list.push({ name, state: JSON.parse(JSON.stringify(S)) }); localStorage.setItem(PROJ_KEY, JSON.stringify(list)); renderProjects(); setStatus(`Saved “${name}”`);
 };
 
-/* --- second column: transform, light, camera */
+/* --- second column (Scene): light, camera, position & angle; scene / surface / table / background sections join it below */
 {
   const c = $('colTransform');
-  const t = section(c, 'Transform');
-  slider(t, 'X Rotation', { ...A('rx'), min: -90, max: 90, fmt: (v) => Math.round(v) + '°' });
-  slider(t, 'Y Rotation', { ...A('ry'), min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
-  slider(t, 'Z Rotation', { ...A('rz'), min: -90, max: 90, fmt: (v) => Math.round(v) + '°' });
-  slider(t, 'X Position', { ...A('px'), min: -0.5, max: 0.5, step: 0.005 });
-  slider(t, 'Y Position', { ...A('py'), min: -0.1, max: 0.6, step: 0.005 });
-  slider(t, 'Z Position', { ...A('pz'), min: -0.6, max: 0.6, step: 0.005 });
-  slider(t, 'Field of view', { ...C('fov'), min: 12, max: 90, fmt: (v) => Math.round(v) + '°' });
-  slider(t, 'Lid', { ...A('lid'), min: 0, max: 135, fmt: (v) => Math.round(v) + '°' });
-  const lidEl = t.lastElementChild; refreshers.push(() => { lidEl.style.display = dev.hingeNode ? '' : 'none'; });
-
-  const l = section(c, 'Light direction');
-  const pad = el('div', { className: 'pad' }), dot = el('i'); pad.append(dot); l.append(pad);
+  const l = section(c, 'Light', true, 'mockup');
+  const pad = el('div', { className: 'pad', title: 'Drag to move the light' }), dot = el('i'); pad.append(dot); l.append(pad);
   const showPad = () => { dot.style.left = ((S.keyAz / 180 + 1) / 2 * 100) + '%'; dot.style.top = ((1 - (S.keyEl - 10) / 75) * 100) + '%'; };
   const movePad = (e) => { const r = pad.getBoundingClientRect(); const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
     S.keyAz = (x * 2 - 1) * 180; S.keyEl = 10 + (1 - y) * 75; applyScene(); showPad(); save(); };
@@ -1177,39 +1171,58 @@ $('btnSaveProject').onclick = () => {
   pad.onpointerup = () => { pad.onpointermove = null; };
   refreshers.push(showPad); showPad();
   slider(l, 'Intensity', { ...A('key'), min: 0, max: 6, step: 0.05 });
-  colorField(l, 'Colour', A('keyColor'));
-  slider(l, 'Soft fill', { ...A('fill_'), min: 0, max: 2, step: 0.02 });
-  slider(l, 'Reflections', { ...A('env'), min: 0, max: 2.5, step: 0.05 });
-  slider(l, 'Screen reflection', { ...A('glow'), min: 0, max: 3, step: 0.05, fmt: (v) => (v ? v.toFixed(2) : 'Off') });
-  note(l, 'Light from the screen on the keyboard and the table. Its colour follows the video as it plays.');
-  slider(l, 'Contact shadow', { ...A('contact'), min: 0, max: 1.5, step: 0.02 });
   slider(l, 'Shadow', { ...A('shadow'), min: 0, max: 1, step: 0.01 });
+  slider(l, 'Contact shadow', { ...A('contact'), min: 0, max: 1.5, step: 0.02 });
+  slider(l, 'Screen reflection', { ...A('glow'), min: 0, max: 3, step: 0.05, fmt: (v) => (v ? v.toFixed(2) : 'Off') });
+  const lm = sub(l, 'More light settings');
+  colorField(lm, 'Colour', A('keyColor'));
+  slider(lm, 'Soft fill', { ...A('fill_'), min: 0, max: 2, step: 0.02 });
+  slider(lm, 'Reflections', { ...A('env'), min: 0, max: 2.5, step: 0.05 });
+  slider(lm, 'Exposure', { ...A('exposure'), min: 0.3, max: 2.2, step: 0.02 });
+  note(lm, 'Screen reflection: light from the screen on the keyboard and the table. Its colour follows the video as it plays.');
 
-  const k = section(c, 'Camera', false);
+  const k = section(c, 'Camera', true, 'mockup');
   selectField(k, 'View', { get: () => '', set: (v) => { if (v) Object.assign(cam(), CAM_PRESETS[v]); }, options: [['', 'Choose…'], ...Object.keys(CAM_PRESETS).map((x) => [x, x])] });
-  slider(k, 'Angle', { ...C('az'), min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
-  slider(k, 'Height', { ...C('el'), min: 0, max: 88, fmt: (v) => Math.round(v) + '°' });
-  slider(k, 'Distance', { ...C('dist'), min: 0.25, max: 2, step: 0.01 });
-  slider(k, 'Shift X', { ...C('tx'), min: -0.4, max: 0.4, step: 0.005 });
-  slider(k, 'Shift Y', { ...C('ty'), min: -0.1, max: 0.4, step: 0.005 });
+  btn(k, 'Fit device to frame', () => { fitLaptop(); save(); refreshControls(); });
+  checkField(k, 'Auto-fit when the ratio changes', { get: () => S.autoFit, set: (v) => { S.autoFit = v; } });
+  const km = sub(k, 'Angle, distance & shift');
+  slider(km, 'Angle', { ...C('az'), min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
+  slider(km, 'Height', { ...C('el'), min: 0, max: 88, fmt: (v) => Math.round(v) + '°' });
+  slider(km, 'Distance', { ...C('dist'), min: 0.25, max: 2, step: 0.01 });
+  slider(km, 'Shift X', { ...C('tx'), min: -0.4, max: 0.4, step: 0.005 });
+  slider(km, 'Shift Y', { ...C('ty'), min: -0.1, max: 0.4, step: 0.005 });
+  slider(km, 'Field of view', { ...C('fov'), min: 12, max: 90, fmt: (v) => Math.round(v) + '°' });
   btn(k, 'Reset camera', () => { S.cams[S.layout] = { ...CAM_DEF[S.layout] }; save(); refreshControls(); });
-  note(k, 'Drag the preview to orbit, scroll to zoom.');
+  note(k, 'Tip: drag the preview to orbit, scroll to zoom.');
+
+  const t = section(c, 'Position & angle', false, 'mockup');
+  slider(t, 'X Rotation', { ...A('rx'), min: -90, max: 90, fmt: (v) => Math.round(v) + '°' });
+  slider(t, 'Y Rotation', { ...A('ry'), min: -180, max: 180, fmt: (v) => Math.round(v) + '°' });
+  slider(t, 'Z Rotation', { ...A('rz'), min: -90, max: 90, fmt: (v) => Math.round(v) + '°' });
+  slider(t, 'X Position', { ...A('px'), min: -0.5, max: 0.5, step: 0.005 });
+  slider(t, 'Y Position', { ...A('py'), min: -0.1, max: 0.6, step: 0.005 });
+  slider(t, 'Z Position', { ...A('pz'), min: -0.6, max: 0.6, step: 0.005 });
+  slider(t, 'Lid', { ...A('lid'), min: 0, max: 135, fmt: (v) => Math.round(v) + '°' });
+  const lidEl = t.lastElementChild; refreshers.push(() => { lidEl.style.display = dev.hingeNode ? '' : 'none'; });
 }
 
 /* --- right column */
 {
   const c = $('colRight');
-  const m = section(c, 'Media');
-  btn(m, 'Upload video or image…', () => $('fileVideo').click(), 'primary');
-  lbl(m, 'Capture a website');
+  const content = section(c, 'Content');
+  seg(content, [['upload', 'Upload'], ['website', 'Website']], { get: () => S.srcTab || 'upload', set: (v) => { S.srcTab = v; } });
+  const up = el('div', { className: 'srcpart', style: 'display:grid;gap:8px' }), m = el('div', { className: 'srcpart', style: 'display:grid;gap:8px' });
+  content.append(up, m);
+  refreshers.push(() => { const w = (S.srcTab || 'upload') === 'website'; up.hidden = w; m.hidden = !w; });
+  btn(up, 'Upload video or image…', () => $('fileVideo').click(), 'primary');
+  note(up, 'MP4, MOV, WebM, PNG or JPG. It plays on the screen of the mockup (or in the Dribbble frame).');
   const urlIn = el('input', { type: 'text', placeholder: 'https://your-website.com', spellcheck: false }); field(m, 'Link', urlIn, 'wide');
   let dur = 0, spd = 700;
-  slider(m, 'Scroll length', { get: () => dur, set: (v) => { dur = v; }, min: 0, max: 40, fmt: (v) => (v ? v + 's' : 'Auto') });
   lbl(m, 'While recording');
   seg(m, [[false, 'Auto scroll'], [true, 'My click plan']], { get: () => !!S.capPlanOn, set: (v) => { S.capPlanOn = v; } });
   const a0 = m.children.length;
   selectField(m, 'Pauses & hovers', { get: () => String(S.interact), set: (v) => { S.interact = +v; }, options: [['0', 'Off — plain scroll'], ['1', 'Light'], ['2', 'Natural'], ['3', 'Lively']] });
-  note(m, 'While recording, it now and then pauses and points at things on the page (menu, buttons, cards, images, accordions), picked at random from the site’s structure. Never clicks links.');
+  note(m, 'Scrolls the page like a person: it pauses now and then to point at menus, buttons, cards and accordions. Never clicks links. To choose what to click, use My click plan.');
   const autoEls = [...m.children].slice(a0);
   // click plan: the person lists what to click and which pages to open; the recorder follows it with natural mouse movement
   const planBox = el('textarea', { className: 'plan', spellcheck: false, rows: 8,
@@ -1223,40 +1236,40 @@ $('btnSaveProject').onclick = () => {
     'The cursor glides to each target, hovers, then clicks. Steps that would pay, submit, delete or sign out are skipped. On the live site a plan can run ~40 s; the Mac app has no limit.' });
   m.append(planHelp);
   refreshers.push(() => { const on = !!S.capPlanOn; autoEls.forEach((e) => { e.style.display = on ? 'none' : ''; }); planBox.style.display = planHelp.style.display = on ? '' : 'none'; if (document.activeElement !== planBox && planBox.value !== (S.capPlan || '')) planBox.value = S.capPlan || ''; });
-  slider(m, 'Scroll speed (recording)', { get: () => spd, set: (v) => { spd = v; }, min: 200, max: 2500, step: 50, fmt: (v) => v + ' px/s' });
-  seg(m, [[400, 'Slow'], [700, 'Normal'], [1100, 'Fast'], [1800, 'Very fast']], { get: () => spd, set: (v) => { spd = v; } });
-  lbl(m, 'Recording size');
-  checkField(m, 'Match the frame (auto)', { get: () => S.capAuto, set: (v) => { S.capAuto = v; } });
-  const sizeNote = el('p', { className: 'note' }); m.append(sizeNote);
-  slider(m, 'Width', { get: () => S.capW, set: (v) => { S.capW = v; }, min: 800, max: 2560, step: 10, fmt: (v) => v + ' px' });
-  const wEl = m.lastElementChild; slider(m, 'Height', { get: () => S.capH, set: (v) => { S.capH = v; }, min: 500, max: 2000, step: 10, fmt: (v) => v + ' px' });
-  const hEl = m.lastElementChild;
-  refreshers.push(() => { const z = captureSize(); sizeNote.textContent = (S.capAuto ? 'Recording at ' : 'Recording at (manual) ') + z.width + '×' + z.height + (S.layout === 'd' ? ' — the Dribbble frame' : ' — the screen shape'); wEl.style.display = hEl.style.display = S.capAuto ? 'none' : ''; });
   const row = el('div', { className: 'row2' }); m.append(row);
-  btn(row, 'Record scroll', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
+  btn(row, 'Record', (b) => captureSite(urlIn.value.trim(), 'scroll', dur, b, spd), 'primary');
   btn(row, 'Screenshot', (b) => captureSite(urlIn.value.trim(), 'screenshot', dur, b));
-  note(m, 'Works with any link: live websites and localhost pages (e.g. localhost:3000).');
-  selectField(m, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit'], ['stretch', 'Stretch']] });
-  colorField(m, 'Letterbox', A('fill'));
-  lbl(m, 'Playback speed (after recording)');
-  slider(m, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2).replace(/\.?0+$/, '') + '×' });
-  seg(m, [[0.5, '0.5×'], [1, '1×'], [1.5, '1.5×'], [2, '2×'], [3, '3×']], { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); } });
-  note(m, 'Change this any time after recording: it speeds up or slows down the whole scroll, and the video length follows.');
-  slider(m, 'Screen brightness', { ...A('brightness'), min: 0.3, max: 1.4, step: 0.02 });
-  checkField(m, 'Loop', { get: () => S.loop, set: (v) => { S.loop = v; } });
+  note(m, 'Works with live websites and localhost pages (e.g. localhost:3000).');
+  const ro = sub(m, 'Recording options');
+  slider(ro, 'Scroll length', { get: () => dur, set: (v) => { dur = v; }, min: 0, max: 40, fmt: (v) => (v ? v + 's' : 'Auto') });
+  slider(ro, 'Scroll speed', { get: () => spd, set: (v) => { spd = v; }, min: 200, max: 2500, step: 50, fmt: (v) => v + ' px/s' });
+  seg(ro, [[400, 'Slow'], [700, 'Normal'], [1100, 'Fast'], [1800, 'Very fast']], { get: () => spd, set: (v) => { spd = v; } });
+  checkField(ro, 'Recording size matches the frame', { get: () => S.capAuto, set: (v) => { S.capAuto = v; } });
+  const sizeNote = el('p', { className: 'note' }); ro.append(sizeNote);
+  slider(ro, 'Width', { get: () => S.capW, set: (v) => { S.capW = v; }, min: 800, max: 2560, step: 10, fmt: (v) => v + ' px' });
+  const wEl = ro.lastElementChild; slider(ro, 'Height', { get: () => S.capH, set: (v) => { S.capH = v; }, min: 500, max: 2000, step: 10, fmt: (v) => v + ' px' });
+  const hEl = ro.lastElementChild;
+  refreshers.push(() => { const z = captureSize(); sizeNote.textContent = (S.capAuto ? 'Recording at ' : 'Recording at (manual) ') + z.width + '×' + z.height + (S.layout === 'd' ? ' — the Dribbble frame' : ' — the screen shape'); wEl.style.display = hEl.style.display = S.capAuto ? 'none' : ''; });
+
+  const pb = section(c, 'Playback & screen');
+  slider(pb, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2).replace(/\.?0+$/, '') + '×' });
+  seg(pb, [[0.5, '0.5×'], [1, '1×'], [1.5, '1.5×'], [2, '2×'], [3, '3×']], { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); } });
+  checkField(pb, 'Loop', { get: () => S.loop, set: (v) => { S.loop = v; } });
+  const pm = sub(pb, 'Fit & brightness');
+  selectField(pm, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit'], ['stretch', 'Stretch']] });
+  colorField(pm, 'Letterbox', A('fill'));
+  slider(pm, 'Screen brightness', { ...A('brightness'), min: 0.3, max: 1.4, step: 0.02 });
+  note(pm, 'Speed works any time after recording: the video length follows. Trim the start or end with ✂ in the timeline.');
 
   const db = section(c, 'Dribbble shot', true, 'dribbble');
   note(db, 'Framed: a 1440×1040 frame in the centre of the 1600×1200 canvas. Full screen: no frame, your video fills the whole 1600×1200 canvas edge to edge.');
   lbl(db, 'Frame');
   seg(db, [[false, 'Framed 1440×1040'], [true, 'Full screen 1600×1200']], { get: () => !!S.dribFull, set: setDribFull });
-  c.prepend(db.parentElement);   // in the Dribbble view its settings come first (the section is hidden in the Mockup view)
   const i0 = db.children.length;
   slider(db, 'Corner radius', { ...A('dribRadius'), min: 0, max: DB.rMax, step: 1, fmt: (v) => Math.round(v) + ' px' });
   seg(db, [[0, '0'], [16, '16'], [24, '24'], [40, '40'], [64, '64']], { get: () => S.dribRadius, set: (v) => { S.dribRadius = v; applyScene(); } });
   slider(db, 'Frame shadow', { ...A('dribShadow'), min: 0, max: 0.5, step: 0.01 });
   const insetEls = [...db.children].slice(i0); refreshers.push(() => { insetEls.forEach((e) => { e.style.display = S.dribFull ? 'none' : ''; }); });   // radius & shadow only apply to the inset frame
-  lbl(db, 'FPS');
-  seg(db, [[15, '15'], [25, '25'], [30, '30'], [60, '60']], { get: () => S.fps, set: (v) => { S.fps = v; } });
   lbl(db, 'Background');
   selectField(db, 'Style', { get: () => S.bgMode, set: (v) => { S.bgMode = v; buildBackground(); },
     options: [['original', 'White'], ['solid', 'Solid colour'], ['gradient', 'Gradient'], ['image', 'Image'], ['transparent', 'Transparent (PNG)']] });
@@ -1269,17 +1282,8 @@ $('btnSaveProject').onclick = () => {
   slider(db, 'Gradient angle', { ...B('angle'), min: 0, max: 360, fmt: (v) => v + '°' });
   btn(db, 'Upload background image…', () => $('fileBg').click());
 
-  const cv = section(c, 'Canvas', true, 'mockup');
-  lbl(cv, 'Aspect');
-  seg(cv, Object.entries(LAYOUTS).filter(([k]) => k !== 'd').map(([k, v]) => [k, v.label]), { get: () => S.layout, set: (v) => setLayout(v), data: 'l' });
-  checkField(cv, 'Auto-fit on ratio change', { get: () => S.autoFit, set: (v) => { S.autoFit = v; } });
-  btn(cv, 'Fit laptop to frame', () => { fitLaptop(); save(); refreshControls(); });
-  lbl(cv, 'FPS');
-  seg(cv, [[15, '15'], [25, '25'], [30, '30'], [60, '60']], { get: () => S.fps, set: (v) => { S.fps = v; } });
-  lbl(cv, 'Safe area');
-  seg(cv, [[0, 'Off'], [1, 'On']], { get: () => +S.safe, set: (v) => { S.safe = !!v; fitPreview(); } });
 
-  const bg = section(c, 'Background', true, 'mockup');
+  let bg = section(c, 'Scene', true, 'mockup');
   const grid = (items, get, set) => {
     const g = el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:6px' }); bg.append(g);
     const bs = items.map((it) => {
@@ -1290,7 +1294,6 @@ $('btnSaveProject').onclick = () => {
     });
     refreshers.push(() => bs.forEach(([id, b]) => { b.style.borderColor = id === get() ? '#fff' : 'transparent'; }));
   };
-  lbl(bg, 'Scenes (one-click looks)');
   const SCENES = [
     { id: 'block', name: 'Concrete block', set: { block: true, surface: 'default', interior: 'none' }, thumb: 't_concrete.jpg' },
     { id: 'walnut', name: 'Walnut table', set: { block: false, surface: 'walnut', interior: 'none' }, thumb: 't_walnut.jpg' },
@@ -1311,7 +1314,8 @@ $('btnSaveProject').onclick = () => {
     sg.append(b); return [sc, b];
   });
   refreshers.push(() => sbs.forEach(([sc, b]) => { b.style.borderColor = Object.entries(sc.set).every(([k, v]) => S[k] === v) && S.bgMode === 'original' ? '#fff' : 'transparent'; }));
-  note(bg, 'Each scene sets the surface, wall and block together. Fine-tune below, or save a look with “Save to project”.');
+  note(bg, 'One click sets the table, wall and block together. Fine-tune them below.');
+  bg = section(c, 'Surface & wall', false, 'mockup');
   lbl(bg, 'Surface (table)');
   grid(SURF, () => S.surface, (v) => { S.surface = v; });
   lbl(bg, 'Interior (wall)');
@@ -1338,6 +1342,8 @@ $('btnSaveProject').onclick = () => {
   slider(bg, 'Wall image height', { get: () => S.wallImgY, set: (v) => { S.wallImgY = v; applyScene(); }, min: -0.2, max: 1.4, step: 0.01, fmt: (v) => Math.round(v * 100) + ' cm' });
   const wallEls = [...bg.children].slice(w0);
   refreshers.push(() => { const on = !!wallImg && S.interior === 'custom'; wallEls.forEach((e) => { e.style.display = on ? '' : 'none'; }); wallRm.style.display = wallImg ? '' : 'none'; });
+  bg = section(c, 'Background colour', false, 'mockup');
+  note(bg, 'Replace the room with a colour, gradient or image.');
   lbl(bg, 'Gradient presets');
   const PRE = [['Sunset', '#ff9a5a', '#c1275e'], ['Ocean', '#0f2027', '#2c9fd9'], ['Violet', '#5b6cff', '#ff7ab6'], ['Mint', '#d4fc79', '#96e6a1'], ['Midnight', '#0b0b12', '#2a2f55'], ['Cream', '#f6eddc', '#d9c3a0'], ['Mono', '#ffffff', '#9a9a9a']];
   const pw = el('div', { style: 'display:grid;grid-template-columns:repeat(7,1fr);gap:6px' }); bg.append(pw);
@@ -1352,7 +1358,8 @@ $('btnSaveProject').onclick = () => {
   colorField(bg, 'Colour 3', BG('c3'));
   slider(bg, 'Angle', { ...BG('angle'), min: 0, max: 360, fmt: (v) => v + '°' });
   btn(bg, 'Upload background image…', () => $('fileBg').click());
-  lbl(bg, 'Original scene');
+  bg = section(c, 'Table & block', false, 'mockup');
+  lbl(bg, 'Table');
   checkField(bg, 'Show table', { get: () => S.tableShow, set: (v) => { S.tableShow = v; S._tableTouched = true; applyScene(); } });
   slider(bg, 'Table size', { get: () => S.tableScale, set: (v) => { S.tableScale = v; applyScene(); }, min: 0.25, max: 1.5, step: 0.01, fmt: (v) => Math.round(v * 100) + '%' });
   slider(bg, 'Table width', { get: () => S.tableW, set: (v) => { S.tableW = v; applyScene(); }, min: 0.25, max: 2, step: 0.01, fmt: (v) => Math.round(v * 100) + '%' });
@@ -1372,7 +1379,8 @@ $('btnSaveProject').onclick = () => {
   colorField(bg, 'Wall tint', { get: () => S.wallColor, set: (v) => { S.wallColor = v; applyScene(); }, fallback: () => '#' + orig.wall.getHexString(), resettable: true });
   btn(bg, 'Restore original background', () => { Object.assign(S, { bgMode: 'original', tableShow: true, tableTint: '#ffffff', wallColor: null, _tableTouched: false }); buildBackground(); refreshControls(); save(); });
 
-  const lg = section(c, 'Logo', false);
+  const ad = section(c, 'Add-ons', false);
+  const lg = ad; lbl(lg, 'Logo');
   const lrow = el('div', { className: 'row2' }); lg.append(lrow);
   btn(lrow, 'Upload logo…', () => $('fileLogo').click(), 'primary');
   btn(lrow, 'Remove', () => { logoImg = null; logoSpr.material.map = null; updateOverlays(); });
@@ -1381,7 +1389,7 @@ $('btnSaveProject').onclick = () => {
   slider(lg, 'Y', { ...OV('logoY'), min: -1, max: 1, step: 0.01 });
   slider(lg, 'Opacity', { ...OV('logoOp'), min: 0, max: 1, step: 0.01 });
 
-  const tx = section(c, 'Text', false);
+  const tx = ad; lbl(tx, 'Text');
   textField(tx, 'Text', { get: () => S.text, set: (v) => { S.text = v; updateOverlays(); } }, 'Add a headline');
   selectField(tx, 'Font', { get: () => S.font, set: (v) => { S.font = v; updateOverlays(); }, options: [['700 Inter, Helvetica, Arial, sans-serif', 'Sans bold'], ['400 Inter, Helvetica, Arial, sans-serif', 'Sans'], ['700 Georgia, "Times New Roman", serif', 'Serif bold'], ['400 Georgia, "Times New Roman", serif', 'Serif'], ['700 "Courier New", monospace', 'Mono']] });
   colorField(tx, 'Colour', OV('textColor'));
@@ -1389,21 +1397,64 @@ $('btnSaveProject').onclick = () => {
   slider(tx, 'X', { ...OV('textX'), min: -1, max: 1, step: 0.01 });
   slider(tx, 'Y', { ...OV('textY'), min: -1, max: 1, step: 0.01 });
 
-  const au = section(c, 'Audio', false);
+  const au = ad; lbl(au, 'Audio');
   checkField(au, 'Preview sound', { get: () => S.sound, set: (v) => { S.sound = v; applyScene(); } });
   note(au, 'Sound plays in the preview. Exported MP4s are silent for now.');
 
-  const dv = section(c, 'Device', true, 'mockup');
-  selectField(dv, '', { get: () => 'mac', set: () => {}, options: [['mac', 'MacBook Pro 14"']] });
+  const dv = $('finishBox');
   const f0 = dv.children.length;
   lbl(dv, 'Finish');
   const FINISH = { 'Space Black': null, Silver: '#cdd0d5', 'Space Gray': '#8b8c8f', Midnight: '#2e3642', Starlight: '#d8d1c7' };
   selectField(dv, '', { get: () => S.finish, set: (v) => { S.finish = v; S.bodyColor = FINISH[v]; applyScene(); }, options: Object.keys(FINISH).map((k) => [k, k]) });
   colorField(dv, 'Custom colour', { get: () => S.bodyColor, set: (v) => { S.bodyColor = v; S.finish = 'Space Black'; applyScene(); }, fallback: () => '#' + orig.body.getHexString(), resettable: true });
-  const finishEls = [...dv.children].slice(f0); refreshers.push(() => { finishEls.forEach((e) => { e.style.display = dev.bodyMats.length ? '' : 'none'; }); });
-  slider(dv, 'Exposure', { ...A('exposure'), min: 0.3, max: 2.2, step: 0.02 });
-  btn(dv, 'Reset all controls', () => { if (!confirm('Reset every control to the original look?')) return; S = defaults(); save(); setLayout('h'); buildBackground(); refreshControls(); });
+  const finishEls = [...dv.children].slice(f0); refreshers.push(() => { const on = dev.bodyMats.length && S.layout !== 'd'; finishEls.forEach((e) => { e.style.display = on ? '' : 'none'; }); dv.style.display = on ? '' : 'none'; });
+  btn(c, 'Reset all controls', () => { if (!confirm('Reset every control to the original look?')) return; S = defaults(); save(); setLayout('h'); buildBackground(); refreshControls(); });
 }
+
+/* --- final arrangement: Scene column (left-middle) and Content column (right), in the order people work */
+{
+  const order = { colTransform: ['Dribbble shot', 'Scene', 'Surface & wall', 'Table & block', 'Background colour', 'Light', 'Camera', 'Position & angle'],
+    colRight: ['Content', 'Playback & screen', 'Add-ons'] };
+  const all = [...document.querySelectorAll('#colTransform > .sec, #colRight > .sec')];
+  for (const [col, keys] of Object.entries(order)) for (const k of keys) { const d = all.find((x) => x.dataset.key === k); if (d) $(col).append(d); }
+  const reset = [...$('colRight').querySelectorAll(':scope > .btn')].find((b) => b.textContent === 'Reset all controls');
+  if (reset) { reset.classList.add('dashed'); reset.style.marginTop = '10px'; $('colRight').append(reset); }
+}
+
+/* --- output bar over the preview: frame ratio, FPS, safe area */
+{
+  const bar = $('outBar');
+  const mk = (cls, kids = []) => { const d = el('div', { className: cls }); kids.forEach((k) => d.append(k)); bar.append(d); return d; };
+  const ratios = mk('grp'); ratios.dataset.mode = 'mockup';
+  const rb = Object.entries(LAYOUTS).filter(([k]) => k !== 'd').map(([k, v]) => { const b = el('button', { textContent: v.label, title: 'Frame ratio ' + v.label, onclick: () => setLayout(k) }); b.dataset.l = k; ratios.append(b); return [k, b]; });
+  const dsize = el('span', { className: 'fixed', title: 'Dribbble shot size' }); dsize.dataset.mode = 'dribbble'; bar.append(dsize);
+  bar.append(el('i', { className: 'sep' }));
+  bar.append(el('span', { className: 'tag', textContent: 'FPS' }));
+  const fps = mk('grp'); const fb = [15, 25, 30, 60].map((v) => { const b = el('button', { textContent: v, onclick: () => { S.fps = v; save(); refreshControls(); } }); fps.append(b); return [v, b]; });
+  bar.append(el('i', { className: 'sep' }));
+  const safe = el('button', { textContent: 'Safe area', title: 'Show the safe area for social posts', onclick: () => { S.safe = !S.safe; fitPreview(); save(); refreshControls(); } }); bar.append(safe);
+  refreshers.push(() => {
+    rb.forEach(([k, b]) => b.classList.toggle('on', k === S.layout)); fb.forEach(([v, b]) => b.classList.toggle('on', v === S.fps)); safe.classList.toggle('on', !!S.safe);
+    dsize.textContent = S.dribFull ? 'Full screen · 1600×1200' : 'Framed · 1600×1200';
+  });
+}
+
+/* --- first-time guide: 1 add content → 2 pick a scene → 3 export (hidden after the first export or when closed) */
+const guide = {
+  show() {
+    const g = $('guide'); if (S.guideDone) { g.hidden = true; return; }
+    const st = [['Add content', src.kind !== 'demo', 'right panel: upload a video or record a website'], ['Pick a scene', !!S.guideScene, 'Scene in the left panel'], ['Export', false, 'Export button, bottom right']];
+    const key = st.map((x) => +x[1]).join(''); if (key === this.key && !g.hidden) return; this.key = key;
+    g.hidden = false; g.innerHTML = '';
+    const ol = el('ol'); st.forEach(([t, done, tip], i) => ol.append(el('li', { className: done ? 'done' : '', title: tip, innerHTML: `<b>${i + 1}</b>${t}` }))); g.append(ol);
+    g.append(el('button', { textContent: '✕', title: 'Hide this guide', onclick: () => { S.guideDone = true; save(); g.hidden = true; } }));
+  },
+};
+$('colTransform').addEventListener('click', (e) => {                // picking any scene, surface, wall or background counts as step 2
+  if (!S.guideScene && e.target.closest('[data-key="Scene"],[data-key="Surface & wall"],[data-key="Background colour"],[data-key="Dribbble shot"]') && e.target.closest('button')) { S.guideScene = true; save(); guide.show(); }
+});
+refreshers.push(() => guide.show());
+setInterval(() => guide.show(), 1000);   // step 1 turns done as soon as a video / recording is loaded
 
 /* --- logo upload */
 $('fileLogo').onchange = (e) => {
@@ -1729,6 +1780,7 @@ async function exportOne(layout, tag) {
   }
 }
 async function runExport(layouts) {
+  if (!S.guideDone) { S.guideDone = true; save(); guide.show(); }   // the first export completes the guide
   if (exporting) return;
   if (!('VideoEncoder' in window)) return setStatus('MP4 export needs a browser with WebCodecs (Chrome, Edge or Safari 17+).', true);
   exporting = true; cancelled = false; bar.hidden = false; fill.style.width = '0'; $('btnCancel').textContent = 'Cancel';
