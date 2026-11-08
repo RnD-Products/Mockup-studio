@@ -31,6 +31,13 @@ app.on('activate', () => { if (!win) createWindow(); });
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'Mockup Studio', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] },
+    { label: 'File', submenu: [                                         // projects are .mockup files; the page does the work (window.mockupProject)
+      { label: 'Open Project…', accelerator: 'CmdOrCtrl+O', click: () => win?.webContents.executeJavaScript('window.mockupProject && window.mockupProject.open()', true) },
+      { type: 'separator' },
+      { label: 'Save Project', accelerator: 'CmdOrCtrl+S', click: () => win?.webContents.executeJavaScript('window.mockupProject && window.mockupProject.save()', true) },
+      { label: 'Save Project As…', accelerator: 'Shift+CmdOrCtrl+S', click: () => win?.webContents.executeJavaScript('window.mockupProject && window.mockupProject.save(true)', true) },
+      { type: 'separator' }, { role: 'close' },
+    ] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'reload' }, { role: 'togglefullscreen' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
     { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }] },

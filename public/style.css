@@ -30,7 +30,7 @@ button { cursor: pointer; }
 .list li:not(.soon):not(.hr)::after { content: "›"; color: var(--muted); }
 .list li.hr { padding: 0; height: 1px; background: var(--line); margin: 8px 12px; cursor: default; }
 .list li.proj::after { content: "✕" !important; }
-#tabMockups, #tabProjects { flex: 1; min-height: 0; overflow: hidden auto; }
+#tabMockups { flex: 1; min-height: 0; overflow: hidden auto; }
 button.dashed { background: none; border: 1px dashed #3a3a3a; border-radius: 10px; padding: 10px; color: var(--muted); }
 button.dashed:hover { color: var(--text); border-color: #555; }
 
@@ -194,7 +194,6 @@ textarea.plan:focus { border-color: #ffffff40; }
 #outBar .tag { color: var(--muted); font-size: 11px; padding: 0 6px 0 8px; white-space: nowrap; }
 #outBar .fixed { color: var(--text); font-weight: 600; font-size: 12px; padding: 6px 10px; }
 .leftfoot { gap: 6px; } .leftfoot button { flex: 1; }
-#btnProjects.on { color: var(--text); border-color: #777; }
 #finishBox:empty { display: none; }
 #finishBox { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 6px; }
 #finishBox .lbl { margin: 0; }
@@ -214,3 +213,11 @@ textarea.plan:focus { border-color: #ffffff40; }
 .leftfoot button { font-size: 12px; white-space: nowrap; padding: 9px 6px; }
 #outBar .fixed { white-space: nowrap; }
 .sub > .sub-title { padding: 6px 2px; color: #b5b5b5; font-weight: 500; }
+
+/* top menu: project name + Open / Save */
+.topmenu { align-items: center; gap: 8px; }
+#projName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#projName.dirty::after { content: " •"; color: var(--muted); }
+.topmenu .tm { display: flex; gap: 4px; flex: none; }
+.topmenu .tm button { background: var(--bar); border: 0; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 600; color: var(--text); }
+.topmenu .tm button:hover { background: var(--bar2); }

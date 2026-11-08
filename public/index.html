@@ -17,15 +17,13 @@
 <div id="app">
   <!-- left: mockups -->
   <aside class="card" id="colLeft">
-    <div class="card-head"><span>Mockups</span></div>
+    <div class="card-head topmenu"><span id="projName" title="Current project">Untitled</span><div class="tm"><button id="btnOpen" title="Open a project file (⌘O)">Open</button><button id="btnSave" title="Save this project to your disk (⌘S)">Save</button></div></div>
     <div class="tabs2" id="modeTabs"><button data-view="mockup" class="on">Mockup</button><button data-view="dribbble">Dribbble</button></div>
     <div id="tabMockups">
       <div class="search"><input id="search" type="text" placeholder="Search mockups" spellcheck="false"></div>
       <ul id="mockList" class="list"></ul>
     </div>
-    <div id="tabProjects" hidden><ul id="projList" class="list"></ul></div>
     <div id="finishBox"></div>
-    <div class="row2 leftfoot"><button id="btnSaveProject" class="dashed">Save to project</button></div>
   </aside>
 
   <!-- second: transform + light -->
@@ -85,6 +83,7 @@
 <input id="fileBg" type="file" accept="image/*" hidden>
 <input id="fileLogo" type="file" accept="image/*" hidden>
 <input id="fileWall" type="file" accept="image/*" hidden>
+<input id="fileProject" type="file" accept=".mockup,.json,application/json" hidden>
 <script type="module" src="app.js"></script>
 </body>
 </html>

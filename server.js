@@ -14,7 +14,7 @@ const capDir = process.env.MOCKUP_CAPTURES_DIR || path.join(root, 'captures');
 fs.mkdirSync(capDir, { recursive: true });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '80mb' }));   // project files can carry a wall image / logo
 
 // The hosted site (Vercel) can ask THIS local app to record localhost pages. Only your own site (and localhost) may call it.
 const originOk = (o) => !!o && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o) ||
@@ -134,6 +134,33 @@ async function openBrowser() {
     }
   }
 }
+
+// Project files (Mac app): native Save / Open dialogs. In a normal browser the app uses the browser's own file pickers instead.
+const electronDialog = async () => (process.versions.electron ? (await import('electron')).dialog : null);
+app.get('/api/project/native', async (req, res) => res.json({ native: !!(await electronDialog()) }));
+app.post('/api/project/save', async (req, res) => {
+  const dialog = await electronDialog(); if (!dialog) return res.status(404).json({ error: 'not available' });
+  const { name = 'Untitled', data, path: known } = req.body || {};
+  try {
+    let file = known && fs.existsSync(path.dirname(known)) ? known : null;
+    if (!file) {
+      const r = await dialog.showSaveDialog({ title: 'Save project', defaultPath: path.join(os.homedir(), 'Documents', `${String(name).replace(/[\\/:*?"<>|]+/g, '-')}.mockup`), filters: [{ name: 'Mockup Studio project', extensions: ['mockup'] }] });
+      if (r.canceled || !r.filePath) return res.json({ cancelled: true });
+      file = r.filePath;
+    }
+    fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data));
+    res.json({ path: file, name: path.basename(file).replace(/\.mockup$/i, '') });
+  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/project/open', async (req, res) => {
+  const dialog = await electronDialog(); if (!dialog) return res.status(404).json({ error: 'not available' });
+  try {
+    const r = await dialog.showOpenDialog({ title: 'Open project', properties: ['openFile'], filters: [{ name: 'Mockup Studio project', extensions: ['mockup', 'json'] }] });
+    if (r.canceled || !r.filePaths?.[0]) return res.json({ cancelled: true });
+    const file = r.filePaths[0];
+    res.json({ path: file, name: path.basename(file).replace(/\.(mockup|json)$/i, ''), data: fs.readFileSync(file, 'utf8') });
+  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
 
 app.post('/api/capture', async (req, res) => {
   const { url, mode = 'scroll', duration = 0, speed = 700, width = 1440, height = 900, interact = 0, plan = '', stream = false } = req.body || {};

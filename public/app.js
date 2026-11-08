@@ -1140,20 +1140,69 @@ function renderMocks() {
   });
 }
 $('search').oninput = renderMocks; renderMocks();
-const PROJ_KEY = 'mockup-projects-v1';
-const projects = () => { try { return JSON.parse(localStorage.getItem(PROJ_KEY) || '[]'); } catch { return []; } };
-function renderProjects() {
-  const ul = $('projList'); ul.innerHTML = ''; const list = projects();
-  if (!list.length) ul.append(el('li', { className: 'soon', textContent: 'No saved projects', style: 'cursor:default' }));
-  list.forEach((p, i) => ul.append(el('li', { className: 'proj', textContent: p.name, onclick: (e) => {
-    if (e.offsetX > e.currentTarget.clientWidth - 30) { list.splice(i, 1); localStorage.setItem(PROJ_KEY, JSON.stringify(list)); renderProjects(); return; }
-    S = { ...defaults(), ...p.state }; save(); setLayout(S.layout); buildBackground(); refreshControls(); setStatus(`Loaded project “${p.name}”`);
-  } })));
-}
-$('btnSaveProject').onclick = () => {
-  const name = prompt('Project name', 'Project ' + (projects().length + 1)); if (!name) return;
-  const list = projects(); list.push({ name, state: JSON.parse(JSON.stringify(S)) }); localStorage.setItem(PROJ_KEY, JSON.stringify(list)); renderProjects(); setStatus(`Saved “${name}”`);
+/* --- projects: save / open the whole look as a .mockup file on disk (settings + wall image, background image and logo) */
+const project = {
+  name: 'Untitled', path: null, handle: null, native: null,
+  async isNative() { if (this.native === null) this.native = hasServer && await fetch('/api/project/native').then((r) => r.json()).then((j) => !!j.native).catch(() => false); return this.native; },
+  imgData(im, max = 2048) {
+    if (!im) return null;
+    try { const k = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); return c.toDataURL('image/png'); } catch { return null; }
+  },
+  serialize() {
+    return JSON.stringify({ app: 'mockup-studio', version: 1, savedAt: new Date().toISOString(), state: S,
+      wallImage: S.interior === 'custom' && !S.wallPreset ? this.imgData(wallImg) : null, bgImage: this.imgData(bgImage), logo: this.imgData(logoImg, 1024) });
+  },
+  show() { $('projName').textContent = this.name; document.title = this.name + ' — Mockup Studio'; },
+  async save(asNew = false) {
+    const data = this.serialize();
+    try {
+      if (await this.isNative()) {                                                // Mac app: the native save dialog
+        const r = await fetch('/api/project/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: this.name, data, path: asNew ? null : this.path }) }).then((x) => x.json());
+        if (r.cancelled) return; if (r.error) throw new Error(r.error);
+        this.path = r.path; this.name = r.name;
+      } else if (window.showSaveFilePicker) {                                     // Chrome / Edge: pick a file, later saves go to the same file
+        if (!this.handle || asNew) this.handle = await showSaveFilePicker({ suggestedName: this.name + '.mockup', types: [{ description: 'Mockup Studio project', accept: { 'application/json': ['.mockup'] } }] });
+        const w = await this.handle.createWritable(); await w.write(data); await w.close(); this.name = this.handle.name.replace(/\.mockup$/i, '');
+      } else {                                                                    // other browsers: download the file
+        const a = el('a', { href: URL.createObjectURL(new Blob([data], { type: 'application/json' })), download: this.name + '.mockup' }); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      }
+      this.show(); setStatus(`Saved “${this.name}” · the uploaded video or recording itself isn’t stored in the project`);
+    } catch (e) { if (e.name !== 'AbortError') setStatus('Could not save the project: ' + e.message, true); }
+  },
+  async open() {
+    try {
+      if (await this.isNative()) {
+        const r = await fetch('/api/project/open', { method: 'POST' }).then((x) => x.json());
+        if (r.cancelled) return; if (r.error) throw new Error(r.error);
+        await this.load(r.data, r.name); this.path = r.path; this.handle = null;
+      } else if (window.showOpenFilePicker) {
+        const [h] = await showOpenFilePicker({ types: [{ description: 'Mockup Studio project', accept: { 'application/json': ['.mockup', '.json'] } }] });
+        await this.load(await (await h.getFile()).text(), h.name.replace(/\.(mockup|json)$/i, '')); this.handle = h; this.path = null;
+      } else $('fileProject').click();
+    } catch (e) { if (e.name !== 'AbortError') setStatus('Could not open the project: ' + e.message, true); }
+  },
+  async load(text, name) {
+    const j = JSON.parse(text); if (!j || j.app !== 'mockup-studio' || !j.state) throw new Error('this is not a Mockup Studio project file');
+    const img = (d) => new Promise((ok) => { if (!d) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = d; });
+    const [wi, bi, li] = await Promise.all([img(j.wallImage), img(j.bgImage), img(j.logo)]);
+    S = { ...defaults(), ...j.state };
+    if (DEVICES[S.device] && dev?.id !== S.device) { try { await loadDevice(S.device); buildContact(); } catch {} }
+    if (wi) { setWallImage(wi); try { localStorage.setItem(WALL_IMG_KEY, j.wallImage); } catch {} } else if (S.wallPreset) loadWallPreset(S.wallPreset, false);
+    bgImage = bi || bgImage;
+    if (li) { logoImg = li; const t = new THREE.Texture(li); t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true; logoSpr.material.map = t; logoSpr.material.needsUpdate = true; }
+    lookKey = ''; save(); setLayout(S.layout); buildBackground(); renderMocks(); updateOverlays(); refreshControls();
+    this.name = name || 'Untitled'; this.show(); setStatus(`Opened “${this.name}”`);
+  },
 };
+window.mockupProject = project;                                      // the Mac app's File menu calls these
+$('btnOpen').onclick = () => project.open();
+$('btnSave').onclick = () => project.save();
+$('fileProject').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { await project.load(await f.text(), f.name.replace(/\.(mockup|json)$/i, '')); } catch (err) { setStatus('Could not open the project: ' + err.message, true); } };
+addEventListener('keydown', (e) => {                                 // ⌘O / ⌘S (Ctrl on Windows) in the browser; the Mac app's menu does the same
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 's') { e.preventDefault(); project.save(e.shiftKey); } else if (k === 'o') { e.preventDefault(); project.open(); }
+});
 
 /* --- second column (Scene): light, camera, position & angle; scene / surface / table / background sections join it below */
 {
