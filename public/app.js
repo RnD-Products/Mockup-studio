@@ -1150,10 +1150,6 @@ function renderProjects() {
     S = { ...defaults(), ...p.state }; save(); setLayout(S.layout); buildBackground(); refreshControls(); setStatus(`Loaded project “${p.name}”`);
   } })));
 }
-$('btnProjects').onclick = () => {                                 // swap the device list for the saved projects (and back)
-  const show = $('tabProjects').hidden; $('tabProjects').hidden = !show; $('tabMockups').hidden = show;
-  $('btnProjects').classList.toggle('on', show); $('btnProjects').textContent = show ? '← Mockups' : 'Projects'; renderProjects();
-};
 $('btnSaveProject').onclick = () => {
   const name = prompt('Project name', 'Project ' + (projects().length + 1)); if (!name) return;
   const list = projects(); list.push({ name, state: JSON.parse(JSON.stringify(S)) }); localStorage.setItem(PROJ_KEY, JSON.stringify(list)); renderProjects(); setStatus(`Saved “${name}”`);
