@@ -50,7 +50,7 @@ const defaults = () => ({
   fill_: 0.15, shadow: 0.55,
   // export
   glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0,
-  autoFit: true, interact: 2, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  autoFit: true, interact: 2, capIntro: true, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
@@ -648,7 +648,7 @@ async function captureSite(url, mode, dur, btn, speed = 700) {
       }
     }
     const r = await fetch(base + '/api/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: recCtrl.signal,
-      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, stream: true, ...size }) });
+      body: JSON.stringify({ url, mode, duration: dur, speed, interact: S.interact, intro: !!S.capIntro, stream: true, ...size }) });
     let j;
     if ((r.headers.get('content-type') || '').includes('ndjson')) j = await readStream(r, (m) => { if (m.p != null) recUI.set(m.p, m.t); });
     else { j = await r.json(); if (!r.ok) throw new Error(j.error || 'Capture failed'); }
@@ -1251,6 +1251,8 @@ addEventListener('keydown', (e) => {                                 // ⌘O / �
   slider(m, 'Scroll length', { get: () => dur, set: (v) => { dur = v; }, min: 0, max: 40, fmt: (v) => (v ? v + 's' : 'Auto') });
   selectField(m, 'Pauses & hovers', { get: () => String(S.interact), set: (v) => { S.interact = +v; }, options: [['0', 'Off — plain scroll'], ['1', 'Light'], ['2', 'Natural'], ['3', 'Lively']] });
   note(m, 'While recording, it now and then pauses and points at things on the page (menu, buttons, cards, images, accordions), picked at random from the site’s structure. Never clicks links.');
+  checkField(m, 'Record the loading screen', { get: () => S.capIntro, set: (v) => { S.capIntro = v; } });
+  note(m, 'Starts filming as soon as the page starts loading, so the site’s loader or intro animation is in the video. (Mac app / local app; the live site records the loaded page.)');
   slider(m, 'Scroll speed (recording)', { get: () => spd, set: (v) => { spd = v; }, min: 200, max: 2500, step: 50, fmt: (v) => v + ' px/s' });
   seg(m, [[400, 'Slow'], [700, 'Normal'], [1100, 'Fast'], [1800, 'Very fast']], { get: () => spd, set: (v) => { spd = v; } });
   lbl(m, 'Recording size');
