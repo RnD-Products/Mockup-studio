@@ -543,7 +543,8 @@ function drawScreen() {
   }
   if (!el || !sw) { if (top) drawBrowserChrome(sctx, W, H0); return; }
   let dw = W, dh = H;
-  const fills = S.fit === 'cover' || src.kind === 'frames' || src.kind === 'scrollimg';   // site recordings always fill the frame
+  // site recordings always fill the frame; with the browser bar everything fits whole below it (nothing cut off at the bottom)
+  const fills = !top && (S.fit === 'cover' || src.kind === 'frames' || src.kind === 'scrollimg');
   if (S.fit !== 'stretch') {
     const k = fills ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh);
     dw = sw * k; dh = sh * k;
@@ -660,7 +661,8 @@ async function readStream(r, onMsg) {
 /** If the recording was made in a different shape than the frame now showing it, offer to re-record to fit. */
 function checkFit() {
   let bar = document.getElementById('fitBar');
-  const need = lastCap && S.capAuto && ['frames', 'scrollimg', 'image'].includes(src.kind) && lastCap.size.width / lastCap.size.height > frameAspect() + 0.04;   // only a recording WIDER than the frame loses its sides
+  const ra = lastCap ? lastCap.size.width / lastCap.size.height : 0;
+  const need = lastCap && S.capAuto && ['frames', 'scrollimg', 'image'].includes(src.kind) && (ra > frameAspect() + 0.04 || (browserOn() && Math.abs(ra - frameAspect()) > 0.04));   // a recording wider than the frame loses its sides; with the browser bar any other shape gets margins
   if (!need) { bar?.remove(); return; }
   const want = captureSize();
   if (!bar) { bar = el('div', { id: 'fitBar' }); document.getElementById('stage').append(bar); }
