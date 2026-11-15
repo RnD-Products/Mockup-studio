@@ -50,7 +50,7 @@ const defaults = () => ({
   fill_: 0.15, shadow: 0.55,
   // export
   glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0,
-  autoFit: true, interact: 2, capIntro: true, capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  autoFit: true, interact: 2, capIntro: true, browserBar: false, browserDark: false, browserUrl: '', capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
@@ -270,7 +270,7 @@ let dev = null;                                   // the active device runtime
 
 /* ---------------- device registry ---------------- */
 const DEVICES = {
-  macbook: { name: 'MacBook Pro 14"', file: 'devices/macbook-scene.glb', aspect: 1.55, screen: /ChangeThis/, ground: 'Ground', lid: 105, el: 22,
+  macbook: { name: 'MacBook Pro 14"', file: 'devices/macbook-scene.glb', aspect: 1.55, notch: true, screen: /ChangeThis/, ground: 'Ground', lid: 105, el: 22,
     hinge: { node: 'HingePivot', axis: 'x', sign: -1, rest: 0 } },
   'macbook-classic': { name: 'MacBook Pro 14" (classic)', file: 'macbook.glb', aspect: 1.535, screenNode: 'Screen', lid: 108, el: 22,
     hinge: { node: 'Lid', axis: 'x', sign: -1, rest: 110 }, body: (m) => m.color.getHexString() === '565457' && m.metalness > 0.9, finish: true },
@@ -477,9 +477,52 @@ function useScrollImage(tiles, meta, label, dur, speed) {
   clock = 0; playing = true; syncPlayBtn();
   setStatus(`Loaded: ${label} (${Math.round(meta.pageHeight)} px page, ${T.toFixed(1)}s scroll${meta.truncated ? ', first 30,000 px' : ''})`);
 }
+/* browser bar (Mockup view only): a Safari-style toolbar on top of the screen, plus the macOS menu bar beside the notch on notched Macs.
+   Sizes follow a real 14" MacBook Pro screen (982 pt tall): menu bar 37 pt, toolbar 52 pt. */
+const browserOn = () => !!S.browserBar && S.layout !== 'd';
+const chromeFrac = () => (browserOn() ? ((dev?.cfg.notch ? 37 : 0) + 52) / 982 : 0);
+function browserHost() {
+  if (S.browserUrl) return S.browserUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  try { if (lastCap?.url) return new URL(lastCap.url).host.replace(/^www\./, ''); } catch {}
+  return 'yourwebsite.com';
+}
+function drawBrowserChrome(g, W, H) {
+  const k = H / 982, dark = !!S.browserDark, font = (w, px) => `${w} ${Math.round(px * k)}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif`;
+  let y = 0;
+  if (dev?.cfg.notch) {                                               // macOS menu bar (the notch sits in its middle)
+    const mh = 37 * k;
+    g.fillStyle = dark ? '#1c1c1e' : '#ececec'; g.fillRect(0, 0, W, mh);
+    g.fillStyle = dark ? '#f2f2f7' : '#1d1d1f'; g.textBaseline = 'middle';
+    g.font = font(700, 13); g.fillText('Safari', 22 * k, mh / 2);
+    g.font = font(400, 13); let x = 22 * k + g.measureText('Safari').width + 18 * k;
+    for (const m of ['File', 'Edit', 'View', 'History', 'Bookmarks', 'Window', 'Help']) { if (x > W * 0.4) break; g.fillText(m, x, mh / 2); x += g.measureText(m).width + 18 * k; }
+    g.textAlign = 'right'; g.fillText('Mon 9:41', W - 22 * k, mh / 2); g.textAlign = 'left';
+    y = mh;
+  }
+  const th = 52 * k, cy = y + th / 2;
+  g.fillStyle = dark ? '#2c2c2e' : '#f6f6f6'; g.fillRect(0, y, W, th);
+  g.fillStyle = dark ? '#000000' : '#d4d4d4'; g.fillRect(0, y + th - Math.max(1, k), W, Math.max(1, k));
+  [['#ff5f57', 20], ['#febc2e', 40], ['#28c840', 60]].forEach(([c, x]) => { g.fillStyle = c; g.beginPath(); g.arc(x * k, cy, 6 * k, 0, Math.PI * 2); g.fill(); });
+  g.strokeStyle = dark ? '#8e8e93' : '#8a8a8e'; g.lineWidth = 2 * k; g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const [x, d] of [[100, -1], [128, 1]]) { g.beginPath(); g.moveTo((x - 3 * d) * k, cy - 7 * k); g.lineTo((x + 4 * d) * k, cy); g.lineTo((x - 3 * d) * k, cy + 7 * k); g.stroke(); }
+  const pw = Math.min(W * 0.46, 620 * k), ph = 32 * k, px = (W - pw) / 2, py = cy - ph / 2, r = 9 * k;
+  g.fillStyle = dark ? '#3a3a3c' : '#e3e3e6'; g.beginPath(); g.roundRect(px, py, pw, ph, r); g.fill();
+  const host = browserHost(); g.font = font(500, 14); g.textBaseline = 'middle';
+  const tw = Math.min(g.measureText(host).width, pw - 70 * k), lx = W / 2 - tw / 2;
+  g.fillStyle = dark ? '#aeaeb2' : '#6e6e73';                                   // padlock
+  g.fillRect(lx - 17 * k, cy - 2 * k, 10 * k, 8 * k); g.lineWidth = 1.6 * k; g.strokeStyle = g.fillStyle;
+  g.beginPath(); g.arc(lx - 12 * k, cy - 3 * k, 3.4 * k, Math.PI, 0); g.stroke();
+  g.fillStyle = dark ? '#f2f2f7' : '#1d1d1f'; g.save(); g.beginPath(); g.rect(lx, py, tw + 2, ph); g.clip(); g.fillText(host, lx, cy + 0.5 * k); g.restore();
+  g.strokeStyle = dark ? '#8e8e93' : '#8a8a8e'; g.lineWidth = 1.8 * k;           // share · new tab · tabs
+  const rx = W - 30 * k;
+  g.beginPath(); g.moveTo(rx - 7 * k, cy); g.lineTo(rx + 7 * k, cy); g.moveTo(rx, cy - 7 * k); g.lineTo(rx, cy + 7 * k); g.stroke();
+  g.beginPath(); g.roundRect(rx - 62 * k, cy - 6 * k, 11 * k, 11 * k, 2 * k); g.stroke(); g.beginPath(); g.roundRect(rx - 58 * k, cy - 9 * k, 11 * k, 11 * k, 2 * k); g.stroke();
+  g.beginPath(); g.moveTo(rx - 96 * k, cy - 2 * k); g.lineTo(rx - 96 * k, cy + 7 * k); g.lineTo(rx - 84 * k, cy + 7 * k); g.lineTo(rx - 84 * k, cy - 2 * k); g.moveTo(rx - 90 * k, cy + 2 * k); g.lineTo(rx - 90 * k, cy - 9 * k); g.moveTo(rx - 94 * k, cy - 5 * k); g.lineTo(rx - 90 * k, cy - 9 * k); g.lineTo(rx - 86 * k, cy - 5 * k); g.stroke();
+}
+
 function drawScreen() {
-  const W = screenCanvas.width, H = screenCanvas.height;
-  sctx.fillStyle = S.fill; sctx.fillRect(0, 0, W, H);
+  const W = screenCanvas.width, H0 = screenCanvas.height, top = Math.round(H0 * chromeFrac()), H = H0 - top;   // content sits below the browser bar
+  sctx.fillStyle = S.fill; sctx.fillRect(0, 0, W, H0);
   let el = null, sw = 0, sh = 0;
   if (src.kind === 'video') {
     if (video.readyState >= 2) { el = video; sw = video.videoWidth; sh = video.videoHeight; }
@@ -498,7 +541,7 @@ function drawScreen() {
   } else if (src.kind === 'demo') {
     drawDemo(src.start + clock); el = demoCanvas; sw = 1600; sh = 1000;
   }
-  if (!el || !sw) return;
+  if (!el || !sw) { if (top) drawBrowserChrome(sctx, W, H0); return; }
   let dw = W, dh = H;
   const fills = S.fit === 'cover' || src.kind === 'frames' || src.kind === 'scrollimg';   // site recordings always fill the frame
   if (S.fit !== 'stretch') {
@@ -506,7 +549,8 @@ function drawScreen() {
     dw = sw * k; dh = sh * k;
   }
   const topAnchor = fills && dh > H && ['frames', 'scrollimg', 'image'].includes(src.kind);   // a site shot loses its bottom, never its top (nav bar)
-  sctx.drawImage(el, (W - dw) / 2, topAnchor ? 0 : (H - dh) / 2, dw, dh);
+  sctx.drawImage(el, (W - dw) / 2, top + (topAnchor ? 0 : (H - dh) / 2), dw, dh);
+  if (top) drawBrowserChrome(sctx, W, H0);
 }
 
 function timeNow() { return src.kind === 'video' ? video.currentTime - src.start : clock; }
@@ -559,7 +603,7 @@ async function findHelper() {
   try { const r = await fetch(HELPER + '/api/ping', { mode: 'cors' }); return r.ok && !!(await r.json()).helper; } catch { return false; }
 }
 /** What shape the page should be recorded in: the same shape as the frame it will be shown in, so nothing is cut off at the sides. */
-const frameAspect = () => (S.layout === 'd' ? (S.dribFull ? DB.W / DB.H : DB.fw / DB.fh) : (dev?.cfg.aspect || 1.55));
+const frameAspect = () => (S.layout === 'd' ? (S.dribFull ? DB.W / DB.H : DB.fw / DB.fh) : (dev?.cfg.aspect || 1.55) / (1 - chromeFrac()));   // with the browser bar the page area is a little shorter
 function captureSize() {
   if (!S.capAuto) return { width: Math.round(S.capW), height: Math.round(S.capH) };
   if (S.layout === 'd' && S.dribFull) return { width: DB.W, height: DB.H };   // full-frame Dribbble: record the page at exactly 1600×1200
@@ -1268,6 +1312,13 @@ addEventListener('keydown', (e) => {                                 // ⌘O / �
   note(m, 'Works with any link: live websites and localhost pages (e.g. localhost:3000).');
   selectField(m, 'Fit', { get: () => S.fit, set: (v) => { S.fit = v; }, options: [['cover', 'Fill (crop)'], ['contain', 'Fit'], ['stretch', 'Stretch']] });
   colorField(m, 'Letterbox', A('fill'));
+  const b0 = m.children.length;
+  lbl(m, 'Browser bar');
+  checkField(m, 'Show a browser bar on the screen', { get: () => S.browserBar, set: (v) => { S.browserBar = v; checkFit(); } });
+  seg(m, [[false, 'Light'], [true, 'Dark']], { get: () => !!S.browserDark, set: (v) => { S.browserDark = v; } });
+  textField(m, 'Address', { get: () => S.browserUrl, set: (v) => { S.browserUrl = v; } }, 'Auto: the recorded site');
+  note(m, 'A Safari-style bar (with the macOS menu bar beside the notch) above your video or recording. Mockup view only.');
+  [...m.children].slice(b0).forEach((e) => { e.dataset.mode = 'mockup'; });   // hidden in the Dribbble view
   lbl(m, 'Playback speed (after recording)');
   slider(m, 'Speed', { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); }, min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2).replace(/\.?0+$/, '') + '×' });
   seg(m, [[0.5, '0.5×'], [1, '1×'], [1.5, '1.5×'], [2, '2×'], [3, '3×']], { get: () => S.speed, set: (v) => { S.speed = v; applyScene(); } });
