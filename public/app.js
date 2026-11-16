@@ -50,7 +50,7 @@ const defaults = () => ({
   fill_: 0.15, shadow: 0.55,
   // export
   glow: 1, wallImgMode: 'fill', wallImgScale: 1, wallImgY: 0.45, wallImgX: 0, wallPreset: null, tableScale: 1, tableW: 1, tableD: 1, tableRot: 0,
-  autoFit: true, interact: 2, capIntro: true, browserBar: false, browserDark: false, browserUrl: '', capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
+  autoFit: true, interact: 2, capIntro: true, browserBar: true, browserDark: false, browserUrl: '', capAuto: true, capW: 1440, capH: 1040, dribShadow: 0, dribRadius: 40, dribFull: false, surface: 'default', block: true, blockSurface: false, blockScale: 1, blockX: 0, blockZ: 0, studioRot: 0, studioZ: 1.2, interior: 'none', contact: 0.8, kf: [], outDir: 'renders', askFolder: true,
   quality: 1080, fps: 30, mbps: 16,
 });
 let S = defaults();
@@ -489,15 +489,8 @@ function browserHost() {
 function drawBrowserChrome(g, W, H) {
   const k = H / 982, dark = !!S.browserDark, font = (w, px) => `${w} ${Math.round(px * k)}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif`;
   let y = 0;
-  if (dev?.cfg.notch) {                                               // macOS menu bar (the notch sits in its middle)
-    const mh = 37 * k;
-    g.fillStyle = dark ? '#1c1c1e' : '#ececec'; g.fillRect(0, 0, W, mh);
-    g.fillStyle = dark ? '#f2f2f7' : '#1d1d1f'; g.textBaseline = 'middle';
-    g.font = font(700, 13); g.fillText('Safari', 22 * k, mh / 2);
-    g.font = font(400, 13); let x = 22 * k + g.measureText('Safari').width + 18 * k;
-    for (const m of ['File', 'Edit', 'View', 'History', 'Bookmarks', 'Window', 'Help']) { if (x > W * 0.4) break; g.fillText(m, x, mh / 2); x += g.measureText(m).width + 18 * k; }
-    g.textAlign = 'right'; g.fillText('Mon 9:41', W - 22 * k, mh / 2); g.textAlign = 'left';
-    y = mh;
+  if (dev?.cfg.notch) {                                               // the strip beside the notch: same colour as the toolbar, so the notch melts into one clean Safari bar
+    y = 37 * k; g.fillStyle = dark ? '#2c2c2e' : '#f6f6f6'; g.fillRect(0, 0, W, y);
   }
   const th = 52 * k, cy = y + th / 2;
   g.fillStyle = dark ? '#2c2c2e' : '#f6f6f6'; g.fillRect(0, y, W, th);
@@ -608,8 +601,8 @@ const frameAspect = () => (S.layout === 'd' ? (S.dribFull ? DB.W / DB.H : DB.fw 
 function captureSize() {
   if (!S.capAuto) return { width: Math.round(S.capW), height: Math.round(S.capH) };
   if (S.layout === 'd' && S.dribFull) return { width: DB.W, height: DB.H };   // full-frame Dribbble: record the page at exactly 1600×1200
-  const width = 1440, a = frameAspect();   // landscape frames all share one tall take (1440×1040): a wider frame only trims its top/bottom, never the sides
-  return { width, height: Math.round(width / (a >= 1.2 ? Math.min(a, 1440 / 1040) : a)) };
+  const width = 1440, a = frameAspect();   // record in exactly the shape it is shown in (the laptop screen below the browser bar, or the Dribbble frame): nothing is trimmed, a centred loader stays whole
+  return { width, height: Math.round(width / a) };
 }
 let lastCap = null;
 /** one recording per frame shape: the Dribbble frame and the laptop screen are different shapes, so each gets its own full-frame take */
